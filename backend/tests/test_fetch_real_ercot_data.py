@@ -105,6 +105,24 @@ def test_extract_xlsx_from_zip_raises_if_missing():
         fetch.extract_xlsx_from_zip(zip_bytes)
 
 
+def test_extract_crrah_participants_skips_footer_row_with_missing_short_name():
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "Sheet1"
+    crrah = wb.create_sheet("CRRAH")
+    crrah.append(["Some", "Header", "Junk"])
+    crrah.append(["NAME", "SHORT NAME", "DUNS NUMBER"])
+    crrah.append(["AES MARKETING AND TRADING LLC (CRRAH)", "XAESMT", "1187367255000"])
+    crrah.append(["2026-09-17 00:00:00", None, None])  # real-world footer row, no short name
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = fetch.extract_crrah_participants(buf.getvalue())
+    assert len(rows) == 1
+    assert rows[0]["short_name"] == "XAESMT"
+
+
 def test_fetch_participant_registry_unwraps_zip_before_parsing_xlsx(tmp_path, monkeypatch):
     """Regression test for the real bug: ERCOT serves this document as a
     zip wrapping the xlsx, not raw xlsx bytes."""

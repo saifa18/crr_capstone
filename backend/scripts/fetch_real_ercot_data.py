@@ -121,7 +121,7 @@ def extract_crrah_participants(xlsx_bytes: bytes) -> list[dict[str, str]]:
                 if row and row[0] == "NAME":
                     header_seen = True
                 continue
-            if not row or not row[0]:
+            if not row or not row[0] or not row[1]:
                 continue
             name, short_name, duns = row[0], row[1], row[2]
             out.append({
