@@ -80,11 +80,50 @@ Fixed: added tier distribution across *all* tracked pairs (not just the top 5), 
 | Basic analytics (average, min/max, volatility, trend) | ✅ | `analytics.basic_metrics` — also adds trailing-12mo average and % months negative beyond the minimum |
 | Explainable opportunity score (Low/Medium/High) | ✅ | `scoring.score_all_pairs` — four named, weighted, inspectable factors |
 
+---
+
+## v1.4 pass (2026-09) -- real data, market intelligence, Streamlit
+
+### Pass 1 -- Head of Software Engineering
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| Real-data ingestion doesn't disturb the existing tested FastAPI path | Yes | Bulk real data lives in `data/raw/crr_auction/`, a directory `ingestion.load_records()`'s flat-`data/raw` tier never reads -- all 93+ pre-existing tests pass unmodified |
+| SQL dependency is no longer load-bearing for non-SQL use | Yes | `db.py`'s SQLAlchemy imports are now lazy, so `app.ingestion` (and the Streamlit app) import cleanly with zero SQL dependencies installed |
+| New analytics are pure, tested functions | Yes | `discover_top_pairs`/`top_paths`/`participant_strategy` are dict-in/dict-out, covered by unit tests including the BUY/SELL netting edge case |
+| Real-data parsing bugs were caught before shipping, not assumed away | Yes | Downloaded and parsed real ERCOT files during design; found and fixed (1) the Market Participants List is a zip wrapping the xlsx, not raw xlsx bytes (`extract_xlsx_from_zip`), and (2) the CRRAH sheet has a trailing footer row that leaked into the participant CSV until the filter required both NAME and SHORT_NAME present |
+
+### Pass 2 -- Senior Power Trader
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| Real participant names, not fictional placeholders | Yes | 1,120,889 real CRR records from Oct 2025–Oct 2026; 377 real Market Participants joined against the real NP12-215-ER CRRAH registry; 521 total companies in the reference data |
+| "Who's doing what" is answerable without paging through raw rows | Yes | Participant Strategy view: certificate count, Option/Obligation split, net position, Pre-Award share, top corridors |
+| "What are the hot paths" is answerable at a glance | Yes | Overview's Hot Paths panel, ranked by real notional activity with a plain-language reason per path |
+| Tracked-pair universe reflects real market activity, not a stale hand-picked list | Yes | ~95,000 distinct Source/Sink pairs in the real dataset; `discover_top_pairs` derives the top 30 from what's actually loaded |
+| Weather is mapped to the zones ERCOT itself uses, with seasonality | Yes | 8 official ERCOT weather zones, trailing-12-month average-temperature series per zone |
+
+### Pass 3 -- Head of Frontend
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| One shareable app, not a two-process setup to boot locally | Yes | Streamlit app imports backend modules directly; `streamlit run streamlit_app/Overview.py` is the only thing to run |
+| Consistent visual language across all four Streamlit pages/tabs | Yes | Shared `lib/theme.py` page config + banner + CSS used by every page |
+| Data-source truth is visible on every page, not just Overview | Yes | `render_data_source_banner` called at the top of every page |
+| Verified live, not just read | Yes | Live QA pass clicked through all four pages, filters, search, and CSV export with real bundled data before this was called done |
+
+**Open items (not blocking, tracked in `lessons_learned_and_future_work.md`):**
+no automated Streamlit UI tests (matches this project's existing pattern of
+smoke-testing the UI layer live rather than unit-testing it); presentation
+deck still not updated for this round.
+
+---
+
 ## Deliverables checklist
 
 | Deliverable | Status | Where |
 |---|---|---|
-| AI prompt journal showing prompt evolution and validation | ✅ | `docs/prompt_journal.md`, 7 entries |
-| Requirements document generated and refined with AI | ✅ | `docs/requirements.md`, v1.2, 15 FRs traced to tests |
-| Working prototype web application | ✅ | `backend/` (75 tests) + `frontend/` (connectable to it) |
-| 60-minute presentation | ✅ | `presentation/ERCOT_CRR_Capstone_Presentation.pptx` (not yet updated for v1.2 — see lessons-learned) |
+| AI prompt journal showing prompt evolution and validation | ✅ | `docs/prompt_journal.md`, 9 entries |
+| Requirements document generated and refined with AI | ✅ | `docs/requirements.md`, v1.4, 22 FRs traced to tests |
+| Working prototype web application | ✅ | `backend/` (93 tests) + `frontend/` (connectable to it) + `streamlit_app/` |
+| 60-minute presentation | ✅ | `presentation/ERCOT_CRR_Capstone_Presentation.pptx` (not yet updated for v1.4 — see lessons-learned) |

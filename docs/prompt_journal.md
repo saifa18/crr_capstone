@@ -330,7 +330,69 @@ so once SQL or CSVs are connected instead.
 
 ---
 
-## Entry 9 (template for your own use)
+## Entry 9 — Real-data + Streamlit rebuild (2026-09)
+
+**Prompt:** Reggie Wade's review call flagged that the app should use
+real ERCOT auction data (a full year), map real participant IDs to real
+names, look at settlement prices (not just LMPs), map weather to
+load-zones/hubs with a seasonality view, and answer "who's doing what" /
+"what are the hot paths." Separately, the deliverable needed to become a
+single shareable Streamlit app rather than a two-process React/FastAPI
+setup.
+
+**Validation before building anything:** rather than trust the project's
+own prior "CRR auction data requires a browser session" conclusion,
+directly tested ERCOT's legacy MIS servlet endpoints with `curl` and found
+them reachable, unauthenticated, and serving the real files -- downloaded
+and parsed a real auction result and a real participant list before
+writing any ingestion code against assumed column names. This surfaced
+real bugs: (1) the Market Participants List is a zip wrapping the xlsx,
+not raw xlsx bytes; (2) the CRRAH sheet has a trailing footer/timestamp
+row. Both would have shipped silently in code that only mocked the real
+files.
+
+**Design decisions made with the user, not assumed:** confirmed BUY/SELL
+netting semantics (net position, not gross double-count) and the
+tracked-pair universe (fully data-driven top-N, not a fixed curated list)
+as explicit choices before writing the design spec, since real data made
+both of these live architectural questions the synthetic dataset had never
+raised.
+
+**What Claude did:** Built `backend/scripts/fetch_real_ercot_data.py` to
+pull real CRR Monthly Auction Results (1,120,889 records across 13 months,
+Oct 2025–Oct 2026) and the real Market Participants List (521 unique
+companies, 377 in the bundled auction data) from ERCOT's public legacy
+MIS servlet. Implemented `analytics.discover_top_pairs` to derive the top
+30 tracked pairs from the ~95,000 distinct pairs actually present in the
+real data, not a hand-curated list. Added `analytics.top_paths` for the
+Hot Paths overview panel and `analytics.participant_strategy` for the
+per-participant Strategy view. Built the Streamlit app
+(`streamlit_app/Overview.py`) as the primary shareable deliverable,
+importing backend analytics modules directly. Added real ERCOT weather-zone
+mapping (8 official zones) with trailing-12-month seasonality per zone.
+
+**Validation:**
+- Real-data fetch: downloaded and parsed real ERCOT files; fixed both
+  discovered parsing bugs before committing to production code.
+- Live QA pass: clicked through all four Streamlit pages
+  (Overview, Source/Sink Explorer, Participants, Opportunity Signals),
+  filters, search, and CSV export with real bundled data before calling
+  done.
+- Backend tests: 93 tests pass (pre-existing suite + new analytics tests).
+- Weather zones: confirmed 8 official ERCOT zones; trailing-12-month
+  seasonality series computes and renders correctly.
+- Streamlit entry point: verified `streamlit run streamlit_app/Overview.py`
+  as the canonical run command (not `app.py` — renamed during live QA for
+  cleaner nav label).
+
+**Result:** kept all of it. The live weather panel and live ERCOT MIS
+servlet fetch were both directly confirmed working end-to-end against real
+production servers during this work — real temperatures (e.g. 80-87°F
+across the 8 zones) displayed during the live browser QA pass.
+
+---
+
+## Entry 10 (template for your own use)
 
 **Prompt:** *(fill in what you asked Claude for)*
 

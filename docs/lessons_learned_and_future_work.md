@@ -52,6 +52,25 @@ conclusion is scoped to what was checked, and a later, more specific ask
 ("get real ERCOT data via API") deserves a fresh check against that
 specific claim rather than a restatement of the prior, broader one.
 
+**7. An earlier "no" is worth re-checking a second time, too.** Lesson 6
+above already documented one case of this (the live Public API). The same
+pattern repeated here: this project had assumed CRR auction data required
+a browser session because ERCOT's modern `mis.ercot.com` file browser is
+JS-driven and session-gated. That's true of that specific interface -- but
+ERCOT also runs an older, still-live, completely unauthenticated legacy
+servlet (`ercot.com/misapp/servlets/IceDocListJsonWS` +
+`ercot.com/misdownload/servlets/mirDownload`) that serves the exact same
+files. It was found only by actually trying it -- downloading and parsing
+a real file -- rather than re-stating the earlier, broader conclusion.
+The fetched data also revealed two real bugs: (1) the real Market
+Participants List document is a zip wrapping the xlsx, not raw xlsx bytes
+— fixed by adding `extract_xlsx_from_zip()`; (2) the real CRRAH sheet has
+a trailing footer/timestamp row that leaked into the participant CSV until
+the row filter was tightened to require both NAME and SHORT_NAME present.
+Both bugs would have shipped silently in code that only mocked the real
+files — further evidence that "verify by actually running it against live
+servers, not just against mocks" matters.
+
 ## Future enhancements
 
 - ~~**Cross-validation against realized DAM/RTM congestion.**~~ **Done.**
@@ -62,10 +81,11 @@ specific claim rather than a restatement of the prior, broader one.
   this live feed to independently corroborate the "consistency" factor in
   the opportunity score itself, rather than only exposing it as a separate
   endpoint.
-- **Live ERCOT MIS ingestion for the auction/participant data itself.**
-  The live Public API (above) does not expose CRR auction awards or
-  participant/MW data — that still requires either a manual CSV drop from
-  MIS or future authenticated browser-session automation.
+- ~~**Live ERCOT MIS ingestion for the auction/participant data itself.**~~
+  **Done (2026-09).** `backend/scripts/fetch_real_ercot_data.py` pulls real
+  CRR Monthly Auction Results and the real Market Participants List
+  directly from ERCOT's public legacy MIS servlet -- no browser session,
+  no authentication. See lesson 7 above.
 - **Confidence/sample-size indicator on the score.** A pair with 6 months
   of history and a pair with 90 months of history can currently land on the
   same score; a visible confidence band (e.g., score ± uncertainty based on

@@ -121,15 +121,73 @@ Regenerate `data/snapshot.json` after any backend analytics change with
 keep `component_body.jsx` and `data/snapshot.json` separate if you're
 running this as a real app rather than a single-file artifact).
 
-## Live ERCOT data (real, free, no CSV download required)
+## Real ERCOT CRR auction data (bundled, no download required)
 
-Beyond the CRR auction CSV path above, this project also integrates
+This repo ships with 13 months of real ERCOT CRR Monthly Auction Results
+(`data/raw/crr_auction/`, 1,120,889 records spanning Oct 2025 – Oct 2026)
+and the real ERCOT Market Participants List (`data/reference/participants.csv`,
+521 unique companies, 377 appearing in the bundled auction data), fetched
+directly from ERCOT's public, unauthenticated legacy MIS servlet endpoints
+-- no browser session, no login, no MIS account required. This corrects an
+earlier assumption in this project (see `docs/lessons_learned_and_future_work.md`)
+that this data could only be reached through the modern, JS-gated
+`mis.ercot.com` file browser.
+
+The Streamlit app (see below) reads this bundled data directly, so it
+works the moment the project folder is copied or unzipped somewhere else
+-- no fetch step required. To refresh it after a new monthly auction
+posts:
+
+```bash
+cd backend
+python scripts/fetch_real_ercot_data.py
+```
+
+This is idempotent -- it only downloads auction months not already present
+locally, and always refreshes the participant registry (a small file,
+updated daily by ERCOT).
+
+The FastAPI backend's own CSV tier is unaffected by this bundled data --
+see `backend/app/ingestion.py`'s module docstring for why it's kept
+completely separate (in short: so this bundled real data can never change
+the FastAPI backend's existing, tested behavior). If you have your own
+real ERCOT CRR CSVs and want the FastAPI backend specifically to use them,
+drop them into `data/raw/` directly (not `data/raw/crr_auction/`) as
+before.
+
+## Quick start -- Streamlit (the primary, shareable app)
+
+```bash
+pip install -r streamlit_app/requirements.txt
+streamlit run streamlit_app/Overview.py
+```
+
+This is a single process, no separate backend server to boot: it imports
+`backend/app/{ingestion,analytics,scoring,domain,weather_zones}.py`
+directly and reads the bundled real data described above. Four pages:
+Overview (dashboard, Hot Paths, opportunity tiers, top participants,
+weather-by-zone), Source/Sink Explorer, Participants (with a per-participant
+Strategy breakdown), and Opportunity Signals.
+
+**Deploying it as a shareable link (Streamlit Community Cloud, free):**
+1. Push this repo to a GitHub repo you own.
+2. Go to https://share.streamlit.io, sign in, click "New app."
+3. Point it at your repo, branch `main`, and main file path
+   `streamlit_app/Overview.py`. Streamlit Cloud auto-detects
+   `streamlit_app/requirements.txt`. Click Deploy.
+
+No environment variables or secrets are required for this to work --
+everything it reads is bundled in the repo.
+
+## Live ERCOT data (real, free, API-based)
+
+Beyond the bundled CRR auction data above, this project also integrates
 **ERCOT's real Public Data API** (`api.ercot.com`) — a genuine, separate,
 free-to-register REST API for live market data, distinct from the
-JS-gated MIS file browser the CRR auction results live behind. It does not
-expose CRR auction awards, but it does expose real, live Day-Ahead Market
-settlement point prices and the binding transmission constraints behind
-them, and this project uses both.
+JS-gated MIS file browser and the legacy servlet that now supplies the
+bundled data. It does not expose CRR auction awards, but it does expose
+real, live Day-Ahead Market settlement point prices and the binding
+transmission constraints behind them, and this project uses both.
 
 **Why this is legitimate CRR-relevant data, not a workaround:** a
 Point-To-Point (PTP) Obligation CRR pays its holder exactly

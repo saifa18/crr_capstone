@@ -276,13 +276,46 @@ connecting a real database on a different machine.
 | FR-15 | `smoketest.js` confirms the panel renders and fails open (loading or clear-error state, never blank) when Open-Meteo is unreachable, which is the actual condition inside this project's build sandbox — see `docs/lessons_learned_and_future_work.md` for what could and couldn't be verified live |
 | FR-16 | `test_load_records_from_sql_returns_correctly_shaped_dicts`, `test_load_records_from_sql_missing_table_raises_clear_error`, `test_get_engine_applies_connect_timeout_for_mssql` (all validated against real SQLite, proving the query/mapping logic without needing a live SQL Server or its ODBC driver); `test_system_status_reflects_sql_not_configured_by_default`; direct foreground check that a misconfigured SQL Server falls back to the synthetic demo in 0.08s with a clear warning, documented in `docs/prompt_journal.md` Entry 8 |
 
-## 9. Future Enhancements (see also `docs/lessons_learned_and_future_work.md`)
+## v1.4 additions (2026-09) -- real data, market intelligence, Streamlit
+
+Driven directly by Reggie Wade's review call (see `docs/prompt_journal.md`
+for the prompt-evolution entry) and a re-investigation of ERCOT's MIS data
+access (see `lessons_learned_and_future_work.md`).
+
+- FR-17: Real CRR Auction Results (13 months, 1,120,889 records spanning
+  Oct 2025 – Oct 2026) and a real participant registry (521 unique companies,
+  377 appearing in the bundled auction data) are bundled in the repo
+  (`data/raw/crr_auction/`, `data/reference/participants.csv`), fetched via
+  `backend/scripts/fetch_real_ercot_data.py` from ERCOT's public,
+  unauthenticated legacy MIS servlet endpoints.
+- FR-18: Tracked Source/Sink pairs are data-driven (top 30 by notional,
+  `analytics.discover_top_pairs`), derived from ~95,000 distinct pairs in
+  the real dataset, not a fixed hand-curated list.
+- FR-19: A "Hot Paths" panel (`analytics.top_paths`) surfaces the most
+  active, most recurringly-congested corridors on the Overview page.
+- FR-20: A per-participant "Strategy" view (`analytics.participant_strategy`)
+  shows certificate count, Option/Obligation split, net Buy/Sell position,
+  Pre-Award vs. Standard-auction share, and top corridors.
+- FR-21: Real ERCOT weather-zone mapping (8 official zones) replaces the
+  earlier 4 ad hoc regions, with a trailing-12-month seasonality time
+  series per zone (`backend/app/weather_zones.py`).
+- FR-22: The primary, shareable web application is a Streamlit app
+  (`streamlit_app/Overview.py`) that imports the backend's analytics modules
+  directly and reads the bundled real data with no second server process, so
+  the whole project folder works standalone when zipped and moved elsewhere.
+  FastAPI (`backend/app/main.py`) and the React frontend (`frontend/src/`)
+  remain in the repo, unmodified, as the existing tested API contract and a
+  reference UI respectively.
+
+## 10. Future Enhancements (see also `docs/lessons_learned_and_future_work.md`)
 - ~~Add DAM/RTM settlement point price feeds to cross-validate CRR value
   against realized congestion, rather than auction clearing price alone.~~
   **Done in v1.1** (FR-7) via the live ERCOT Public API.
-- Live ingestion from ERCOT MIS itself (the CRR auction/participant data)
-  once authenticated browser-session access is scripted — still open; the
-  live API in FR-7 covers price/congestion data but not auction awards.
+- ~~**Live ERCOT MIS ingestion for the auction/participant data itself.**~~
+  **Done (2026-09).** `backend/scripts/fetch_real_ercot_data.py` pulls real
+  CRR Monthly Auction Results and the real Market Participants List
+  directly from ERCOT's public legacy MIS servlet — no browser session,
+  no authentication. See lesson 7 in `lessons_learned_and_future_work.md`.
 - Wire the live-lmp-spread and binding-constraints endpoints (FR-7) into
   the interactive UI as an optional overlay when a backend is reachable —
   currently backend-only; see README's "why this isn't in the artifact."
