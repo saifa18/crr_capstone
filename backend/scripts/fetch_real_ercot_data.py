@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
 import zipfile
 from pathlib import Path
@@ -40,7 +41,7 @@ AUCTION_REPORT_TYPE_ID = 11201       # NP7-803-M, Monthly Auction Results
 PARTICIPANT_REPORT_TYPE_ID = 21129   # NP12-215-ER, List of Market Participants
 REQUEST_TIMEOUT = 60
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR = Path(os.environ.get("CRR_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
 AUCTION_OUT_DIR = DATA_DIR / "raw" / "crr_auction"
 PARTICIPANTS_OUT_PATH = DATA_DIR / "reference" / "participants.csv"
 
@@ -100,23 +101,26 @@ def extract_crrah_participants(xlsx_bytes: bytes) -> list[dict[str, str]]:
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True)
-    ws = wb["CRRAH"]
-    out = []
-    header_seen = False
-    for row in ws.iter_rows(values_only=True):
-        if not header_seen:
-            if row and row[0] == "NAME":
-                header_seen = True
-            continue
-        if not row or not row[0]:
-            continue
-        name, short_name, duns = row[0], row[1], row[2]
-        out.append({
-            "name": str(name).strip(),
-            "short_name": str(short_name).strip(),
-            "duns_number": str(duns).strip() if duns is not None else "",
-        })
-    return out
+    try:
+        ws = wb["CRRAH"]
+        out = []
+        header_seen = False
+        for row in ws.iter_rows(values_only=True):
+            if not header_seen:
+                if row and row[0] == "NAME":
+                    header_seen = True
+                continue
+            if not row or not row[0]:
+                continue
+            name, short_name, duns = row[0], row[1], row[2]
+            out.append({
+                "name": str(name).strip(),
+                "short_name": str(short_name).strip(),
+                "duns_number": str(duns).strip() if duns is not None else "",
+            })
+        return out
+    finally:
+        wb.close()
 
 
 def fetch_auction_results(session: requests.Session | None = None) -> list[Path]:
