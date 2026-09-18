@@ -167,8 +167,7 @@ def test_get_engine_applies_connect_timeout_for_mssql(monkeypatch):
         captured["kwargs"] = kwargs
         return create_engine("sqlite:///:memory:")  # stand-in, we only care about the call args
 
-    import sqlalchemy
-    monkeypatch.setattr(sqlalchemy, "create_engine", fake_create_engine)
+    monkeypatch.setattr(db, "create_engine", fake_create_engine)
     db.get_engine(url="mssql+pyodbc://user:pass@nonexistent-host:1433/db?driver=ODBC+Driver+18+for+SQL+Server")
 
     assert captured["kwargs"]["connect_args"] == {"timeout": 3}
@@ -181,8 +180,7 @@ def test_get_engine_skips_timeout_arg_for_non_mssql_urls(monkeypatch):
         captured["kwargs"] = kwargs
         return create_engine("sqlite:///:memory:")
 
-    import sqlalchemy
-    monkeypatch.setattr(sqlalchemy, "create_engine", fake_create_engine)
+    monkeypatch.setattr(db, "create_engine", fake_create_engine)
     db.get_engine(url="sqlite:///:memory:")
 
     assert captured["kwargs"]["connect_args"] == {}

@@ -69,32 +69,44 @@ from __future__ import annotations
 import os
 from typing import Any
 
+try:
+    from sqlalchemy import Column, Engine, Float, MetaData, String, Table, create_engine, select
+    from sqlalchemy.exc import SQLAlchemyError
+except ImportError:  # exercised by test_db_module_importable_without_sqlalchemy
+    Column = Engine = Float = MetaData = String = Table = create_engine = select = None  # type: ignore
+    SQLAlchemyError = Exception  # placeholder so `except SQLAlchemyError:` clauses below stay valid
+
 DEFAULT_TABLE_NAME = "crr_auction_records"
 
-metadata = None
+metadata = MetaData() if MetaData is not None else None
 
 
-def _get_metadata():
-    global metadata
-    if metadata is None:
-        from sqlalchemy import MetaData
-        metadata = MetaData()
-    return metadata
+def _require_sqlalchemy() -> None:
+    """Raises a clear, actionable error if sqlalchemy isn't installed --
+    called at the top of every function that actually needs it, so
+    `app.db` (and everything that imports it, like `app.ingestion`) stays
+    importable without sqlalchemy, while any real attempt to use SQL
+    Server support fails with a helpful message instead of a raw
+    NoneType-is-not-callable traceback."""
+    if MetaData is None:
+        raise SqlBackendError(
+            "SQL Server support requires the 'sqlalchemy' and 'pyodbc' packages, "
+            "which are not installed in this environment. Install them (see "
+            "backend/requirements.txt) to use a real SQL Server data source."
+        )
 
 
-def _table(name: str):
+def _table(name: str) -> Table:
     """Builds (or returns the already-built) Table object for a given
     table name. `extend_existing=True` makes repeated calls with the same
     name safe (e.g. across multiple requests) rather than raising on a
     duplicate definition."""
-    from sqlalchemy import Column, Float, String, Table
-
-    md = _get_metadata()
-    if name in md.tables:
-        return md.tables[name]
+    _require_sqlalchemy()
+    if name in metadata.tables:
+        return metadata.tables[name]
     return Table(
         name,
-        md,
+        metadata,
         Column("auction_month", String(7)),
         Column("source", String(50)),
         Column("sink", String(50)),
@@ -165,7 +177,7 @@ def _build_connection_url() -> str:
     )
 
 
-def get_engine(url: str | None = None):
+def get_engine(url: str | None = None) -> Engine:
     """Creates a SQLAlchemy engine for the configured (or given) database.
     Does not connect yet -- SQLAlchemy engines are lazy; the first real
     query is what actually opens a connection and is where a bad
@@ -177,8 +189,7 @@ def get_engine(url: str | None = None):
     (which can be 60+ seconds) -- this matters a lot in a web API, where a
     hung connection attempt blocks a request thread, not just an
     interactive script."""
-    from sqlalchemy import create_engine
-
+    _require_sqlalchemy()
     resolved_url = url or _build_connection_url()
     timeout_seconds = int(os.environ.get("SQL_SERVER_CONNECT_TIMEOUT_SECONDS", "10"))
     try:
@@ -190,14 +201,13 @@ def get_engine(url: str | None = None):
         raise SqlBackendError(f"Could not build a database engine: {e}") from e
 
 
-def init_db(engine, table_name: str | None = None) -> None:
+def init_db(engine: Engine, table_name: str | None = None) -> None:
     """Creates the expected table if it doesn't exist yet. Safe to call
     against an existing, already-populated table (no-op in that case).
     Mainly useful for a quick local smoke test against SQLite -- against a
     real production SQL Server, a DBA-managed schema
     (see scripts/create_sql_server_schema.sql) is usually preferred."""
-    from sqlalchemy.exc import SQLAlchemyError
-
+    _require_sqlalchemy()
     table_name = table_name or os.environ.get("SQL_SERVER_TABLE", DEFAULT_TABLE_NAME)
     table = _table(table_name)
     try:
@@ -206,7 +216,7 @@ def init_db(engine, table_name: str | None = None) -> None:
         raise SqlBackendError(f"Could not create/verify table '{table_name}': {e}") from e
 
 
-def load_records_from_sql(engine=None, table_name: str | None = None) -> list[dict[str, Any]]:
+def load_records_from_sql(engine: Engine | None = None, table_name: str | None = None) -> list[dict[str, Any]]:
     """Queries every row from the CRR auction records table and returns
     them in the exact dict shape analytics.py/scoring.py already expect --
     so once this succeeds, the rest of the backend needs zero changes.
@@ -216,9 +226,7 @@ def load_records_from_sql(engine=None, table_name: str | None = None) -> list[di
     table, a missing ODBC driver, etc. all get a specific, readable
     explanation rather than a raw driver traceback.
     """
-    from sqlalchemy import select
-    from sqlalchemy.exc import SQLAlchemyError
-
+    _require_sqlalchemy()
     table_name = table_name or os.environ.get("SQL_SERVER_TABLE", DEFAULT_TABLE_NAME)
     eng = engine or get_engine()
     table = _table(table_name)
