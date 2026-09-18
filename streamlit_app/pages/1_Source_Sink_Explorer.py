@@ -66,7 +66,7 @@ st.dataframe(
         for p in pair_participants[:15]
     ],
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
 )
 
 if series:

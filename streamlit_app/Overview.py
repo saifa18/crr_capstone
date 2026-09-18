@@ -1,6 +1,6 @@
 """ERCOT CRR Market Analytics -- Overview (Streamlit entry point).
 
-Run with: `streamlit run streamlit_app/app.py` from the project root.
+Run with: `streamlit run streamlit_app/Overview.py` from the project root.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ st.dataframe(
         for p in participants[:10]
     ],
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
 )
 
 st.divider()

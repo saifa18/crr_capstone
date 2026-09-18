@@ -31,7 +31,7 @@ st.dataframe(
         for p in filtered
     ],
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
 )
 
 st.divider()
@@ -61,7 +61,7 @@ if names:
             for p in strategy["top_pairs"]
         ],
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 else:
     st.info("No participants in the tracked-pair universe yet.")
