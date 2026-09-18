@@ -1120,15 +1120,28 @@ def discover_top_pairs(records: list[dict], n: int = 30) -> list[dict]:
     pair's all-time average -- the same directional-consistency idea
     scoring.py already uses per-pair, exposed here as a plain count rather
     than a 0-100 score.
+
+    Real ERCOT data has ~95,000 distinct Source/Sink pairs (confirmed
+    against the real bundled dataset) -- a naive "for each pair, re-scan
+    all records" approach is O(pairs x records) and does not finish in
+    reasonable time at that scale. This does one O(records) pass, building
+    a per-pair aggregate as it goes, then ranks and slices.
     """
-    pairs = all_pairs(records)
+    by_pair: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in records:
+        key = (r["source"], r["sink"])
+        agg = by_pair.get(key)
+        if agg is None:
+            agg = {"notional": 0.0, "participants": set(), "monthly_prices": defaultdict(list)}
+            by_pair[key] = agg
+        agg["notional"] += abs(r["awarded_mw"]) * abs(r["clearing_price"])
+        agg["participants"].add(r["participant"])
+        agg["monthly_prices"][r["auction_month"]].append(r["clearing_price"])
+
     ranked = []
-    for source, sink in pairs:
-        pair_recs = filter_records(records, source=source, sink=sink)
-        notional = sum(abs(r["awarded_mw"]) * abs(r["clearing_price"]) for r in pair_recs)
-        participants = {r["participant"] for r in pair_recs}
-        series = monthly_price_series(pair_recs)
-        prices = [m["avg_clearing_price"] for m in series]
+    for (source, sink), agg in by_pair.items():
+        months_sorted = sorted(agg["monthly_prices"])
+        prices = [statistics.mean(agg["monthly_prices"][m]) for m in months_sorted]
         recurring_months = 0
         if prices:
             avg = statistics.mean(prices)
@@ -1138,8 +1151,8 @@ def discover_top_pairs(records: list[dict], n: int = 30) -> list[dict]:
         ranked.append({
             "source": source,
             "sink": sink,
-            "total_notional": round(notional, 2),
-            "participant_count": len(participants),
+            "total_notional": round(agg["notional"], 2),
+            "participant_count": len(agg["participants"]),
             "recurring_months": recurring_months,
             "months_tracked": len(prices),
         })
