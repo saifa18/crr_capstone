@@ -154,50 +154,54 @@ def _load_participant_registry(registry_path: "Path | None" = None) -> dict[str,
 def _map_row(
     headers: list[str], row: list[str], participant_registry: dict[str, str] | None = None
 ) -> dict | None:
-    norm_headers = [_normalize_header(h) for h in headers]
-    header_index = {h: i for i, h in enumerate(norm_headers)}
-
-    out: dict[str, str] = {}
-    for field, aliases in _COLUMN_ALIASES.items():
-        idx = _find_column(header_index, aliases)
-        if idx is None:
-            if field == "auction_month":
-                continue  # may still be derivable from start_date below
-            return None  # required column missing -- skip row gracefully
-        out[field] = row[idx]
-
-    if "auction_month" not in out:
-        start_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["start_date"])
-        derived = _derive_auction_month(row[start_idx]) if start_idx is not None else None
-        if derived is None:
-            return None
-        out["auction_month"] = derived
-
-    bid_type_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["bid_type"])
-    bid_type = row[bid_type_idx].strip().upper() if bid_type_idx is not None else "BUY"
-
-    award_type_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["award_type"])
-    award_type = row[award_type_idx].strip().upper() if award_type_idx is not None else None
-
     try:
-        price = float(out["clearing_price"])
-        mw = float(out["awarded_mw"])
-    except (TypeError, ValueError):
+        norm_headers = [_normalize_header(h) for h in headers]
+        header_index = {h: i for i, h in enumerate(norm_headers)}
+
+        out: dict[str, str] = {}
+        for field, aliases in _COLUMN_ALIASES.items():
+            idx = _find_column(header_index, aliases)
+            if idx is None:
+                if field == "auction_month":
+                    continue  # may still be derivable from start_date below
+                return None  # required column missing -- skip row gracefully
+            out[field] = row[idx]
+
+        if "auction_month" not in out:
+            start_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["start_date"])
+            derived = _derive_auction_month(row[start_idx]) if start_idx is not None else None
+            if derived is None:
+                return None
+            out["auction_month"] = derived
+
+        bid_type_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["bid_type"])
+        bid_type = row[bid_type_idx].strip().upper() if bid_type_idx is not None else "BUY"
+
+        award_type_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["award_type"])
+        award_type = row[award_type_idx].strip().upper() if award_type_idx is not None else None
+
+        try:
+            price = float(out["clearing_price"])
+            mw = float(out["awarded_mw"])
+        except (TypeError, ValueError):
+            return None
+
+        out["clearing_price"] = price
+        out["awarded_mw"] = -mw if bid_type == "SELL" else mw
+        out["crr_type"] = _normalize_crr_type_value(out["crr_type"])
+        out["time_of_use"] = _normalize_tou_value(out["time_of_use"])
+        out["award_type"] = award_type if award_type in ("PREAWARD", "STANDARD") else "STANDARD"
+
+        short_code = out["participant"].strip()
+        registry = participant_registry or {}
+        out["participant"] = registry.get(short_code, short_code)
+        out["participant_short_code"] = short_code
+
+        out["is_synthetic"] = False
+        return out
+    except IndexError:
+        # Truncated/incomplete row (fewer fields than headers require) -- skip gracefully
         return None
-
-    out["clearing_price"] = price
-    out["awarded_mw"] = -mw if bid_type == "SELL" else mw
-    out["crr_type"] = _normalize_crr_type_value(out["crr_type"])
-    out["time_of_use"] = _normalize_tou_value(out["time_of_use"])
-    out["award_type"] = award_type if award_type in ("PREAWARD", "STANDARD") else "STANDARD"
-
-    short_code = out["participant"].strip()
-    registry = participant_registry or {}
-    out["participant"] = registry.get(short_code, short_code)
-    out["participant_short_code"] = short_code
-
-    out["is_synthetic"] = False
-    return out
 
 
 def _load_real_csvs_from(directory: Path, participant_registry: dict[str, str] | None = None) -> list[dict]:

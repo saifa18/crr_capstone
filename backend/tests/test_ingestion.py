@@ -128,3 +128,8 @@ def test_load_bulk_real_auction_data_uses_real_files_when_present(tmp_path, monk
     assert source == ingestion.SOURCE_CSV
     assert len(records) == 1
     assert records[0]["participant"] == "REAL NAME LLC"
+
+
+def test_map_row_returns_none_for_truncated_row_instead_of_crashing():
+    truncated_row = _real_row()[:5]  # fewer fields than REAL_HEADERS has columns
+    assert ingestion._map_row(REAL_HEADERS, truncated_row) is None
