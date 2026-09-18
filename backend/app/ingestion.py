@@ -54,57 +54,157 @@ SOURCE_SQL = "sql_server_real"
 SOURCE_CSV = "ercot_mis_real"
 SOURCE_SYNTHETIC = "synthetic_demo"
 
-# Column names as published in ERCOT's CRR Auction Results reports
-# (NP7-802-M Long-Term Auction Results / NP7-803-M Monthly Auction Results).
-# ERCOT's exact header casing has varied slightly across format revisions,
-# so we match case-insensitively and accept a couple of known aliases.
-_COLUMN_ALIASES = {
-    "auction_month": {"auctionid", "auction", "auctionmonth", "deliverymonth"},
-    "source": {"sourcelocation", "source", "sourcesettlementpoint"},
-    "sink": {"sinklocation", "sink", "sinksettlementpoint"},
-    "crr_type": {"crrtype", "type"},
-    "time_of_use": {"timeofuse", "tou", "hourtype"},
-    "clearing_price": {"crrclearingprice", "clearingprice", "shadowpriceperm wh".replace(" ", ""),
-                        "shadowpricepermwh"},
-    "awarded_mw": {"mw", "awardedquantity", "crmquantity", "quantity"},
-    "participant": {"crraccountholder", "accountholder", "participant", "marketparticipant"},
+# Column names as published in ERCOT's real CRR Auction Results reports
+# (NP7-803-M Monthly Auction Results, "Common_MarketResults_*.csv" inside
+# the auction zip -- see backend/scripts/fetch_real_ercot_data.py). Matched
+# case-insensitively; order within each tuple is priority (first match
+# wins), which matters for crr_type below.
+_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    # auction_month has no reliable direct column in the real file -- see
+    # _derive_auction_month(), tried only when none of these match.
+    "auction_month": ("auctionid", "auction", "auctionmonth", "deliverymonth"),
+    "source": ("sourcelocation", "source", "sourcesettlementpoint"),
+    "sink": ("sinklocation", "sink", "sinksettlementpoint"),
+    # HedgeType (OBL/OPT) is ERCOT's real Option/Obligation column. CRRType
+    # in that same real file means something different (PREAWARD/STANDARD,
+    # captured separately as "award_type" below) -- hedgetype is checked
+    # first so a real file's CRRType column is never mistaken for it.
+    "crr_type": ("hedgetype", "crrtype", "type"),
+    "time_of_use": ("timeofuse", "tou", "hourtype"),
+    "clearing_price": ("shadowpricepermwh", "crrclearingprice", "clearingprice"),
+    "awarded_mw": ("mw", "awardedquantity", "crmquantity", "quantity"),
+    "participant": ("accountholder", "crraccountholder", "participant", "marketparticipant"),
+}
+
+# Present in some real layouts, absent in others (including every existing
+# synthetic/older-format record) -- missing any of these does NOT cause the
+# row to be skipped, unlike _COLUMN_ALIASES above.
+_OPTIONAL_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "award_type": ("crrtype",),    # PREAWARD / STANDARD, real ERCOT files only
+    "bid_type": ("bidtype",),      # BUY / SELL, real ERCOT files only
+    "start_date": ("startdate",),  # used to derive auction_month when needed
+}
+
+_TIME_OF_USE_MAP = {
+    "PEAKWD": "PEAK_WD",
+    "PEAKWE": "PEAK_WE",
+    "OFFPEAK": "OFF_PEAK",
+}
+
+_CRR_TYPE_MAP = {
+    "OBL": "OBLIGATION",
+    "OBLIGATION": "OBLIGATION",
+    "OPT": "OPTION",
+    "OPTION": "OPTION",
 }
 
 
 def _normalize_header(h: str) -> str:
-    return h.strip().lower().replace(" ", "").replace("_", "")
+    return h.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
 
 
-def _map_row(headers: list[str], row: list[str]) -> dict | None:
+def _normalize_tou_value(raw: str) -> str:
+    key = raw.strip().upper().replace("-", "").replace("_", "").replace(" ", "")
+    return _TIME_OF_USE_MAP.get(key, raw.strip().upper())
+
+
+def _normalize_crr_type_value(raw: str) -> str:
+    key = raw.strip().upper()
+    return _CRR_TYPE_MAP.get(key, key)
+
+
+def _find_column(header_index: dict[str, int], aliases: tuple[str, ...]) -> int | None:
+    for alias in aliases:
+        if alias in header_index:
+            return header_index[alias]
+    return None
+
+
+def _derive_auction_month(start_date: str) -> str | None:
+    """StartDate is 'MM/DD/YYYY' in ERCOT's real Monthly Auction Results
+    file, which otherwise has no explicit auction/delivery-month column."""
+    try:
+        month, _day, year = start_date.strip().split("/")
+        return f"{year}-{int(month):02d}"
+    except (ValueError, AttributeError):
+        return None
+
+
+def _load_participant_registry(registry_path: "Path | None" = None) -> dict[str, str]:
+    """Maps ERCOT's masked CRR Account Holder short codes (e.g. 'XSARAC') to
+    real company names, from the real Market Participants List (NP12-215-ER,
+    CRRAH sheet -- see backend/scripts/fetch_real_ercot_data.py). Returns {}
+    if the registry file doesn't exist, so callers fall back to showing the
+    short code as the participant name -- same as before this registry
+    existed, never a crash."""
+    path = registry_path or PARTICIPANT_REGISTRY_PATH
+    if not path.exists():
+        return {}
+    registry: dict[str, str] = {}
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            short_name = (row.get("short_name") or "").strip()
+            full_name = (row.get("name") or "").strip()
+            if short_name and full_name:
+                registry[short_name] = full_name
+    return registry
+
+
+def _map_row(
+    headers: list[str], row: list[str], participant_registry: dict[str, str] | None = None
+) -> dict | None:
     norm_headers = [_normalize_header(h) for h in headers]
-    out = {}
+    header_index = {h: i for i, h in enumerate(norm_headers)}
+
+    out: dict[str, str] = {}
     for field, aliases in _COLUMN_ALIASES.items():
-        idx = None
-        for i, h in enumerate(norm_headers):
-            if h in aliases:
-                idx = i
-                break
+        idx = _find_column(header_index, aliases)
         if idx is None:
-            return None  # required column missing -- skip file gracefully
+            if field == "auction_month":
+                continue  # may still be derivable from start_date below
+            return None  # required column missing -- skip row gracefully
         out[field] = row[idx]
 
+    if "auction_month" not in out:
+        start_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["start_date"])
+        derived = _derive_auction_month(row[start_idx]) if start_idx is not None else None
+        if derived is None:
+            return None
+        out["auction_month"] = derived
+
+    bid_type_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["bid_type"])
+    bid_type = row[bid_type_idx].strip().upper() if bid_type_idx is not None else "BUY"
+
+    award_type_idx = _find_column(header_index, _OPTIONAL_COLUMN_ALIASES["award_type"])
+    award_type = row[award_type_idx].strip().upper() if award_type_idx is not None else None
+
     try:
-        out["clearing_price"] = float(out["clearing_price"])
-        out["awarded_mw"] = float(out["awarded_mw"])
+        price = float(out["clearing_price"])
+        mw = float(out["awarded_mw"])
     except (TypeError, ValueError):
         return None
 
-    out["crr_type"] = out["crr_type"].strip().upper()
-    out["time_of_use"] = out["time_of_use"].strip().upper()
+    out["clearing_price"] = price
+    out["awarded_mw"] = -mw if bid_type == "SELL" else mw
+    out["crr_type"] = _normalize_crr_type_value(out["crr_type"])
+    out["time_of_use"] = _normalize_tou_value(out["time_of_use"])
+    out["award_type"] = award_type if award_type in ("PREAWARD", "STANDARD") else "STANDARD"
+
+    short_code = out["participant"].strip()
+    registry = participant_registry or {}
+    out["participant"] = registry.get(short_code, short_code)
+    out["participant_short_code"] = short_code
+
     out["is_synthetic"] = False
     return out
 
 
-def _load_real_csvs() -> list[dict]:
-    if not RAW_DIR.exists():
+def _load_real_csvs_from(directory: Path, participant_registry: dict[str, str] | None = None) -> list[dict]:
+    if not directory.exists():
         return []
     records: list[dict] = []
-    for csv_path in sorted(RAW_DIR.glob("*.csv")):
+    for csv_path in sorted(directory.glob("*.csv")):
         with open(csv_path, newline="", encoding="utf-8-sig") as f:
             reader = csv.reader(f)
             try:
@@ -114,10 +214,34 @@ def _load_real_csvs() -> list[dict]:
             for row in reader:
                 if not row:
                     continue
-                mapped = _map_row(headers, row)
+                mapped = _map_row(headers, row, participant_registry)
                 if mapped:
                     records.append(mapped)
     return records
+
+
+def _load_real_csvs() -> list[dict]:
+    return _load_real_csvs_from(RAW_DIR)
+
+
+BULK_AUCTION_DIR = RAW_DIR / "crr_auction"
+PARTICIPANT_REGISTRY_PATH = DATA_DIR / "reference" / "participants.csv"
+
+
+def load_bulk_real_auction_data() -> tuple[list[dict], str, str | None]:
+    """Real, bulk-downloaded ERCOT CRR Monthly Auction Results (see
+    backend/scripts/fetch_real_ercot_data.py) joined against the real
+    participant registry -- this is the data source the Streamlit app
+    uses. Deliberately separate from load_records()'s SQL/flat-CSV/
+    synthetic tiers (which read from RAW_DIR directly, not
+    RAW_DIR/'crr_auction') so committing this bulk real data into the repo
+    cannot change the FastAPI backend's existing, tested behavior. Falls
+    back to load_records() if the bulk directory is empty or missing."""
+    registry = _load_participant_registry(PARTICIPANT_REGISTRY_PATH)
+    records = _load_real_csvs_from(BULK_AUCTION_DIR, registry)
+    if records:
+        return records, SOURCE_CSV, None
+    return load_records()
 
 
 def load_records() -> tuple[list[dict], str, str | None]:
