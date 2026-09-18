@@ -95,6 +95,17 @@ def extract_market_results_csv(zip_bytes: bytes) -> bytes:
     raise ValueError("No Common_MarketResults_*.csv member found in this zip")
 
 
+def extract_xlsx_from_zip(zip_bytes: bytes) -> bytes:
+    """ERCOT serves the Market Participants List as a zip wrapping a
+    single .xlsx member (matching the doc list's Extension: 'zip') --
+    this pulls that member's bytes out."""
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        xlsx_names = [n for n in zf.namelist() if n.endswith(".xlsx")]
+        if not xlsx_names:
+            raise ValueError("No .xlsx member found in participant list zip")
+        return zf.read(xlsx_names[0])
+
+
 def extract_crrah_participants(xlsx_bytes: bytes) -> list[dict[str, str]]:
     """Pulls the CRRAH sheet (NAME, SHORT NAME, DUNS NUMBER columns) out of
     the real Market Participants List workbook."""
@@ -153,7 +164,8 @@ def fetch_participant_registry(session: requests.Session | None = None) -> Path:
     if not docs:
         raise RuntimeError("ERCOT returned no Market Participants List documents")
     latest = max(docs, key=lambda d: d["PublishDate"])
-    xlsx_bytes = download_document(latest["DocID"], sess)
+    zip_bytes = download_document(latest["DocID"], sess)
+    xlsx_bytes = extract_xlsx_from_zip(zip_bytes)
     rows = extract_crrah_participants(xlsx_bytes)
 
     PARTICIPANTS_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)

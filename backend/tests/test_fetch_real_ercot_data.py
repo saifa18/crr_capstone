@@ -92,3 +92,47 @@ def test_extract_crrah_participants_parses_sheet():
         "short_name": "XAESMT",
         "duns_number": "1187367255000",
     }]
+
+
+def test_extract_xlsx_from_zip_finds_the_member():
+    zip_bytes = _make_zip({"List_of_Market_Participants_in_ERCOT_Region_20260917.xlsx": b"fake xlsx content"})
+    assert fetch.extract_xlsx_from_zip(zip_bytes) == b"fake xlsx content"
+
+
+def test_extract_xlsx_from_zip_raises_if_missing():
+    zip_bytes = _make_zip({"something.csv": b"data"})
+    with pytest.raises(ValueError, match="xlsx"):
+        fetch.extract_xlsx_from_zip(zip_bytes)
+
+
+def test_fetch_participant_registry_unwraps_zip_before_parsing_xlsx(tmp_path, monkeypatch):
+    """Regression test for the real bug: ERCOT serves this document as a
+    zip wrapping the xlsx, not raw xlsx bytes."""
+    import openpyxl
+
+    monkeypatch.setattr(fetch, "PARTICIPANTS_OUT_PATH", tmp_path / "participants.csv")
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "Sheet1"
+    crrah = wb.create_sheet("CRRAH")
+    crrah.append(["Some", "Header", "Junk"])
+    crrah.append(["NAME", "SHORT NAME", "DUNS NUMBER"])
+    crrah.append(["AES MARKETING AND TRADING LLC (CRRAH)", "XAESMT", "1187367255000"])
+    xlsx_buf = io.BytesIO()
+    wb.save(xlsx_buf)
+    zip_bytes = _make_zip({"List_of_Market_Participants_in_ERCOT_Region_20260917.xlsx": xlsx_buf.getvalue()})
+
+    session = MagicMock()
+    doc_list_response = MagicMock(
+        status_code=200,
+        json=lambda: {"ListDocsByRptTypeRes": {"DocumentList": [
+            {"Document": {"DocID": "1", "FriendlyName": "MPList", "PublishDate": "2026-09-17T09:41:27-05:00"}}
+        ]}},
+    )
+    download_response = MagicMock(status_code=200, content=zip_bytes)
+    session.get.side_effect = [doc_list_response, download_response]
+
+    out_path = fetch.fetch_participant_registry(session=session)
+    content = out_path.read_text()
+    assert "XAESMT" in content
+    assert "AES MARKETING AND TRADING LLC" in content
