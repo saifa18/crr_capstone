@@ -167,7 +167,8 @@ def test_get_engine_applies_connect_timeout_for_mssql(monkeypatch):
         captured["kwargs"] = kwargs
         return create_engine("sqlite:///:memory:")  # stand-in, we only care about the call args
 
-    monkeypatch.setattr(db, "create_engine", fake_create_engine)
+    import sqlalchemy
+    monkeypatch.setattr(sqlalchemy, "create_engine", fake_create_engine)
     db.get_engine(url="mssql+pyodbc://user:pass@nonexistent-host:1433/db?driver=ODBC+Driver+18+for+SQL+Server")
 
     assert captured["kwargs"]["connect_args"] == {"timeout": 3}
@@ -180,7 +181,27 @@ def test_get_engine_skips_timeout_arg_for_non_mssql_urls(monkeypatch):
         captured["kwargs"] = kwargs
         return create_engine("sqlite:///:memory:")
 
-    monkeypatch.setattr(db, "create_engine", fake_create_engine)
+    import sqlalchemy
+    monkeypatch.setattr(sqlalchemy, "create_engine", fake_create_engine)
     db.get_engine(url="sqlite:///:memory:")
 
     assert captured["kwargs"]["connect_args"] == {}
+
+
+def test_db_module_importable_without_sqlalchemy(monkeypatch):
+    """Simulates sqlalchemy not being installed at all (as on a minimal
+    Streamlit Cloud container) and verifies `app.db` still imports and its
+    is_sql_configured() check still works -- this is what lets the
+    Streamlit app import app.ingestion without needing sqlalchemy/pyodbc."""
+    import importlib
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sqlalchemy", None)
+    monkeypatch.setitem(sys.modules, "sqlalchemy.exc", None)
+    monkeypatch.delitem(sys.modules, "app.db", raising=False)
+
+    reloaded = importlib.import_module("app.db")
+    assert reloaded.is_sql_configured() in (True, False)
+
+    monkeypatch.delitem(sys.modules, "app.db", raising=False)
+    importlib.import_module("app.db")  # restore a normal import for later tests

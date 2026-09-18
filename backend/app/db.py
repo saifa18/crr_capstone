@@ -69,33 +69,32 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from sqlalchemy import (
-    Column,
-    Engine,
-    Float,
-    MetaData,
-    String,
-    Table,
-    create_engine,
-    select,
-)
-from sqlalchemy.exc import SQLAlchemyError
-
 DEFAULT_TABLE_NAME = "crr_auction_records"
 
-metadata = MetaData()
+metadata = None
 
 
-def _table(name: str) -> Table:
+def _get_metadata():
+    global metadata
+    if metadata is None:
+        from sqlalchemy import MetaData
+        metadata = MetaData()
+    return metadata
+
+
+def _table(name: str):
     """Builds (or returns the already-built) Table object for a given
     table name. `extend_existing=True` makes repeated calls with the same
     name safe (e.g. across multiple requests) rather than raising on a
     duplicate definition."""
-    if name in metadata.tables:
-        return metadata.tables[name]
+    from sqlalchemy import Column, Float, String, Table
+
+    md = _get_metadata()
+    if name in md.tables:
+        return md.tables[name]
     return Table(
         name,
-        metadata,
+        md,
         Column("auction_month", String(7)),
         Column("source", String(50)),
         Column("sink", String(50)),
@@ -166,7 +165,7 @@ def _build_connection_url() -> str:
     )
 
 
-def get_engine(url: str | None = None) -> Engine:
+def get_engine(url: str | None = None):
     """Creates a SQLAlchemy engine for the configured (or given) database.
     Does not connect yet -- SQLAlchemy engines are lazy; the first real
     query is what actually opens a connection and is where a bad
@@ -178,6 +177,8 @@ def get_engine(url: str | None = None) -> Engine:
     (which can be 60+ seconds) -- this matters a lot in a web API, where a
     hung connection attempt blocks a request thread, not just an
     interactive script."""
+    from sqlalchemy import create_engine
+
     resolved_url = url or _build_connection_url()
     timeout_seconds = int(os.environ.get("SQL_SERVER_CONNECT_TIMEOUT_SECONDS", "10"))
     try:
@@ -189,12 +190,14 @@ def get_engine(url: str | None = None) -> Engine:
         raise SqlBackendError(f"Could not build a database engine: {e}") from e
 
 
-def init_db(engine: Engine, table_name: str | None = None) -> None:
+def init_db(engine, table_name: str | None = None) -> None:
     """Creates the expected table if it doesn't exist yet. Safe to call
     against an existing, already-populated table (no-op in that case).
     Mainly useful for a quick local smoke test against SQLite -- against a
     real production SQL Server, a DBA-managed schema
     (see scripts/create_sql_server_schema.sql) is usually preferred."""
+    from sqlalchemy.exc import SQLAlchemyError
+
     table_name = table_name or os.environ.get("SQL_SERVER_TABLE", DEFAULT_TABLE_NAME)
     table = _table(table_name)
     try:
@@ -203,7 +206,7 @@ def init_db(engine: Engine, table_name: str | None = None) -> None:
         raise SqlBackendError(f"Could not create/verify table '{table_name}': {e}") from e
 
 
-def load_records_from_sql(engine: Engine | None = None, table_name: str | None = None) -> list[dict[str, Any]]:
+def load_records_from_sql(engine=None, table_name: str | None = None) -> list[dict[str, Any]]:
     """Queries every row from the CRR auction records table and returns
     them in the exact dict shape analytics.py/scoring.py already expect --
     so once this succeeds, the rest of the backend needs zero changes.
@@ -213,6 +216,9 @@ def load_records_from_sql(engine: Engine | None = None, table_name: str | None =
     table, a missing ODBC driver, etc. all get a specific, readable
     explanation rather than a raw driver traceback.
     """
+    from sqlalchemy import select
+    from sqlalchemy.exc import SQLAlchemyError
+
     table_name = table_name or os.environ.get("SQL_SERVER_TABLE", DEFAULT_TABLE_NAME)
     eng = engine or get_engine()
     table = _table(table_name)
