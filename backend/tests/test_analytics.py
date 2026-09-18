@@ -155,3 +155,72 @@ def test_recent_auction_month():
     recs = [_rec("2024-01", 1.0), _rec("2025-06", 1.0), _rec("2023-12", 1.0)]
     assert analytics.recent_auction_month(recs) == "2025-06"
     assert analytics.recent_auction_month([]) is None
+
+
+def test_discover_top_pairs_ranks_by_notional_and_caps_at_n():
+    recs = [_rec(f"2024-{m:02d}", 10.0, mw=100.0, source="A", sink="B") for m in (1, 2)]
+    recs += [_rec("2024-01", 1.0, mw=5.0, source="C", sink="D")]
+    top = analytics.discover_top_pairs(recs, n=1)
+    assert len(top) == 1
+    assert top[0]["source"] == "A" and top[0]["sink"] == "B"
+    assert top[0]["total_notional"] == pytest.approx(2000.0)
+
+
+def test_discover_top_pairs_uses_absolute_value_for_netted_sell_rows():
+    recs = [
+        _rec("2024-01", 5.0, mw=50.0, source="A", sink="B"),
+        _rec("2024-01", 5.0, mw=-20.0, source="A", sink="B"),
+    ]
+    top = analytics.discover_top_pairs(recs, n=5)
+    assert top[0]["total_notional"] == pytest.approx((50 + 20) * 5.0)
+
+
+def test_discover_top_pairs_counts_distinct_participants():
+    recs = [
+        _rec("2024-01", 5.0, source="A", sink="B", participant="X"),
+        _rec("2024-01", 5.0, source="A", sink="B", participant="Y"),
+        _rec("2024-01", 5.0, source="A", sink="B", participant="X"),
+    ]
+    top = analytics.discover_top_pairs(recs, n=5)
+    assert top[0]["participant_count"] == 2
+
+
+def test_top_paths_includes_plain_language_reason():
+    recs = [_rec(f"2024-{m:02d}", 10.0, mw=50.0, source="A", sink="B") for m in range(1, 13)]
+    paths = analytics.top_paths(recs, n=5)
+    assert len(paths) == 1
+    assert "months" in paths[0]["reason"]
+    assert "participants" in paths[0]["reason"]
+
+
+def test_participant_strategy_nets_buy_and_sell_mw():
+    recs = [
+        _rec("2024-01", 5.0, mw=50.0, source="A", sink="B", crr_type="OBLIGATION"),
+        _rec("2024-01", 5.0, mw=-20.0, source="A", sink="B", crr_type="OBLIGATION"),
+    ]
+    strat = analytics.participant_strategy("X", recs)
+    assert strat["net_mw"] == 30.0
+    assert strat["certificate_count"] == 2
+
+
+def test_participant_strategy_option_obligation_split():
+    recs = [
+        _rec("2024-01", 1.0, crr_type="OPTION"),
+        _rec("2024-01", 1.0, crr_type="OPTION"),
+        _rec("2024-01", 1.0, crr_type="OBLIGATION"),
+    ]
+    strat = analytics.participant_strategy("X", recs)
+    assert strat["option_pct"] == pytest.approx(66.7, abs=0.1)
+    assert strat["obligation_pct"] == pytest.approx(33.3, abs=0.1)
+
+
+def test_participant_strategy_preaward_pct_defaults_when_missing():
+    recs = [_rec("2024-01", 1.0), _rec("2024-02", 1.0)]
+    strat = analytics.participant_strategy("X", recs)
+    assert strat["preaward_pct"] == 0.0
+
+
+def test_participant_strategy_empty_records_is_safe():
+    strat = analytics.participant_strategy("Nobody", [])
+    assert strat["certificate_count"] == 0
+    assert strat["top_pairs"] == []
