@@ -371,15 +371,19 @@ second-priority data source, used only if SQL Server isn't configured (see
   `HB_HOUSTON`, `LZ_AEN`, ...) but `is_synthetic: true`-tagged, and the UI
   shows a persistent banner saying so — this project never presents
   synthetic numbers as if they were ERCOT's real historical settlements.
-- **Participant names are fictional.** "Lone Star Power Trading LLC,"
-  "Permian Basin Energy Partners," and the dozen or so others in
-  `data_generator.py` are made-up placeholder company names, not real
-  ERCOT market participants. There is no way to get real CRR Account
-  Holder data short of a real database load (see "Connecting to a real SQL
-  Server database" above) or real CSVs from `mis.ercot.com` — ERCOT's live
-  Public API has no participant-level endpoint at all (see "Live ERCOT
-  data" above). Once SQL or CSVs are connected, real participant names
-  flow through automatically with zero code changes.
+- **Participant names are fictional — but only in this synthetic fallback
+  path.** "Lone Star Power Trading LLC," "Permian Basin Energy Partners,"
+  and the dozen or so others in `data_generator.py` are made-up
+  placeholder company names, not real ERCOT market participants. This
+  fallback only runs when no real data source is available. The Streamlit
+  app (see "Quick start — Streamlit" above) uses real CRR Account Holder
+  names by default, from the bundled real participant registry. The
+  FastAPI backend's own flat-CSV/SQL tiers pick up real names the same way
+  once pointed at real data (a real database load, or real CSVs — see
+  "Connecting to a real SQL Server database" and "Using your own ERCOT CRR
+  auction data files" above); ERCOT's live Public API has no
+  participant-level endpoint at all (see "Live ERCOT data" above), so that
+  path never carries participant names either way.
 - The price process is a **seeded, fully deterministic** random walk
   (`SEED` in `data_generator.py`) with pair-specific base congestion
   levels, summer/winter seasonal premiums, and a few illustrative
