@@ -350,26 +350,20 @@ banner in the UI) rather than silently substituting different data and
 looking fine. An unreachable host also fails in a few seconds, not the
 60+-second OS default, via `SQL_SERVER_CONNECT_TIMEOUT_SECONDS`.
 
-## Using real ERCOT CRR auction data via CSV (no database available)
+## Using your own ERCOT CRR auction data files (optional)
 
-If you don't have a SQL Server set up (previous section) but do have
-access to real ERCOT files, this is the lighter-weight option — it's the
-second-priority data source, used only if SQL Server isn't configured.
-
-ERCOT publishes real historical CRR Auction Results at
-`ercot.com/mp/data-products` — **NP7-802-M** (Long-Term Auction Results)
-and **NP7-803-M** (Monthly Auction Results) — including Source, Sink, CRR
-type, clearing price, and CRR Account Holder (participant), free to the
-public via MIS. That download center requires a browser session and isn't
-scriptable from this offline build environment, so this prototype ships
-with a synthetic-but-realistic fallback (see "Why synthetic data?" below).
-
-To use real data: log into `mis.ercot.com`, download the CRR Auction
-Results CSV(s) you want, and drop them into `data/raw/`. On next backend
+If you have your own real ERCOT CRR Auction Results CSVs from
+`ercot.com/mp/data-products` (e.g., **NP7-802-M** for Long-Term or
+**NP7-803-M** for Monthly Auction Results — including Source, Sink, CRR
+type, clearing price, and CRR Account Holder) and want the FastAPI backend
+specifically to use them: drop them into `data/raw/` (not `data/raw/crr_auction/`,
+which is reserved for the bundled real data described earlier). On next backend
 start, `ingestion.py` will detect them (column-matched case-insensitively
 against ERCOT's published header names) and use them automatically instead
 of the synthetic generator — no code changes required. The analytics and
-scoring modules are 100% agnostic to where the records came from.
+scoring modules are 100% agnostic to where the records came from. This is the
+second-priority data source, used only if SQL Server isn't configured (see
+"Connecting to a real SQL Server database" above).
 
 ## Why synthetic data, and how it was built responsibly
 
