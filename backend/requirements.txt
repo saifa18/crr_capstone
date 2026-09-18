@@ -6,3 +6,4 @@ requests==2.32.3
 sqlalchemy==2.0.53
 pyodbc==5.1.0
 python-dotenv==1.0.1
+openpyxl==3.1.5
