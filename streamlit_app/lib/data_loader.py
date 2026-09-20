@@ -18,7 +18,7 @@ _BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from app import analytics, domain, scoring, weather_zones  # noqa: E402
+from app import analytics, domain, ercot_live, live_congestion, scoring, weather_zones  # noqa: E402
 from app.ingestion import load_bulk_real_auction_data  # noqa: E402
 
 TOP_N_PAIRS = 30
@@ -135,3 +135,56 @@ def get_corridor_map_points() -> list[dict]:
             "pair_count": count,
         })
     return out
+
+
+@st.cache_data(ttl=900, show_spinner="Fetching live binding constraints...")
+def get_binding_constraints(days_back: int = 7) -> dict:
+    """Real, live ERCOT binding transmission constraints (DAM shadow
+    prices) for the trailing `days_back` days -- answers "why is this
+    congested right now" with the actual named grid element, not a
+    statistical inference. Never raises: returns one of three states
+    (not configured / API error / real data) so the caller renders
+    exactly one, matching the weather panel's fail-open pattern. Capped
+    at 15 pages (~15,000 rows) so a wide date range degrades to a
+    truncated-but-fast result instead of a very slow one."""
+    import datetime as _dt
+
+    if not ercot_live.ErcotApiClient.is_configured():
+        return {"configured": False, "error": None, "constraints": [], "truncated": False}
+
+    date_to = _dt.date.today()
+    date_from = date_to - _dt.timedelta(days=days_back)
+
+    rows: list[dict] = []
+    truncated = False
+    try:
+        client = ercot_live.ErcotApiClient()
+        page = 1
+        max_pages = 15
+        while True:
+            response = client.get_dam_shadow_prices(
+                date_from.isoformat(), date_to.isoformat(), page=page, size=1000
+            )
+            rows.extend(live_congestion.parse_api_rows(response))
+            pages = live_congestion.total_pages(response)
+            if page >= pages or page >= max_pages:
+                truncated = page < pages
+                break
+            page += 1
+    except ercot_live.ErcotApiError as e:
+        return {"configured": True, "error": str(e), "constraints": [], "truncated": False}
+
+    constraints = [
+        {
+            "delivery_date": str(r.get("deliveryDate", ""))[:10],
+            "hour_ending": r.get("hourEnding"),
+            "constraint_name": r.get("constraintName"),
+            "contingency_name": r.get("contingencyName"),
+            "shadow_price": r.get("shadowPrice"),
+            "from_station": r.get("fromStation"),
+            "to_station": r.get("toStation"),
+        }
+        for r in rows
+    ]
+    constraints.sort(key=lambda c: (c["delivery_date"], c["hour_ending"] or 0), reverse=True)
+    return {"configured": True, "error": None, "constraints": constraints, "truncated": truncated}
