@@ -26,25 +26,55 @@ selected = top_pairs[pair_labels.index(choice)]
 src, snk = selected["source"], selected["sink"]
 
 tou_choice = st.radio("Time of Use", ["ALL", "PEAK_WD", "PEAK_WE", "OFF_PEAK"], horizontal=True)
-crr_type_choice = st.radio("CRR Type", ["OBLIGATION", "OPTION"], horizontal=True)
+tou_filter = None if tou_choice == "ALL" else tou_choice
 
-pair_records = analytics.filter_records(
-    tracked_records,
-    source=src,
-    sink=snk,
-    crr_type=crr_type_choice,
-    time_of_use=None if tou_choice == "ALL" else tou_choice,
+obligation_records = analytics.filter_records(
+    tracked_records, source=src, sink=snk, crr_type="OBLIGATION", time_of_use=tou_filter
 )
+option_records = analytics.filter_records(
+    tracked_records, source=src, sink=snk, crr_type="OPTION", time_of_use=tou_filter
+)
+obligation_series = analytics.monthly_price_series(obligation_records)
+option_series = analytics.monthly_price_series(option_records)
+metrics = analytics.basic_metrics(obligation_records)
 
-series = analytics.monthly_price_series(pair_records)
-metrics = analytics.basic_metrics(pair_records)
+st.subheader(f"{src} → {snk} ({tou_choice})")
 
-st.subheader(f"{src} → {snk} ({crr_type_choice}, {tou_choice})")
-if series:
-    st.line_chart({s["auction_month"]: s["avg_clearing_price"] for s in series})
+if obligation_series or option_series:
+    from lib.theme import COLORS
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    if obligation_series:
+        fig.add_trace(go.Scatter(
+            x=[s["auction_month"] for s in obligation_series],
+            y=[s["avg_clearing_price"] for s in obligation_series],
+            mode="lines+markers",
+            name="Obligation",
+            line=dict(color=COLORS["obligation"], width=2),
+        ))
+    if option_series:
+        fig.add_trace(go.Scatter(
+            x=[s["auction_month"] for s in option_series],
+            y=[s["avg_clearing_price"] for s in option_series],
+            mode="lines+markers",
+            name="Option",
+            line=dict(color=COLORS["option"], width=2),
+        ))
+    fig.update_layout(
+        xaxis_title="Auction Month",
+        yaxis_title="Avg Clearing Price ($/MWh)",
+        height=400,
+        hovermode="x unified",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No records for this pair/filter combination.")
 
+st.caption("Metrics below are computed on Obligation records — the direct economic-value signal (see scoring.py).")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Average", metrics["average"])
 m2.metric("Trailing 12mo Avg", metrics["trailing_12mo_average"])
@@ -69,10 +99,15 @@ st.dataframe(
     width="stretch",
 )
 
-if series:
+if obligation_series:
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["auction_month", "avg_clearing_price"])
-    for row in series:
-        writer.writerow([row["auction_month"], row["avg_clearing_price"]])
+    writer.writerow(["auction_month", "obligation_avg_clearing_price", "option_avg_clearing_price"])
+    option_by_month = {s["auction_month"]: s["avg_clearing_price"] for s in option_series}
+    for row in obligation_series:
+        writer.writerow([
+            row["auction_month"],
+            row["avg_clearing_price"],
+            option_by_month.get(row["auction_month"], ""),
+        ])
     st.download_button("Download CSV", buf.getvalue(), file_name=f"{src}_{snk}_series.csv")
