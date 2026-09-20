@@ -9,6 +9,18 @@ import streamlit as st
 
 PAGE_ICON = "⚡"
 
+# Fixed color-to-meaning mapping used everywhere a chart or badge needs
+# one of these concepts -- Obligation is always this exact green, Option
+# is always this exact amber, tiers are always these three colors, on
+# every page. Never hardcode these hex values anywhere else.
+COLORS = {
+    "obligation": "#2ecc71",
+    "option": "#f39c12",
+    "tier_high": "#2ecc71",
+    "tier_medium": "#f39c12",
+    "tier_low": "#7f8c8d",
+}
+
 _CSS = """
 <style>
 .crr-banner {
