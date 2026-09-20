@@ -496,7 +496,7 @@ with st.container(border=True):
             for p in filtered
         ],
         hide_index=True,
-        width="stretch",
+        use_container_width=True,
     )
 
 st.divider()
@@ -527,7 +527,7 @@ with st.container(border=True):
                 for p in strategy["top_pairs"]
             ],
             hide_index=True,
-            width="stretch",
+            use_container_width=True,
         )
     else:
         st.info("No participants in the tracked-pair universe yet.")
