@@ -47,6 +47,34 @@ with st.container(border=True):
 
 st.divider()
 
+with st.container(border=True):
+    st.subheader("Corridor Map")
+    st.caption("Tracked hubs and load zones, sized by how many of the top-30 corridors touch that point.")
+    map_points = data_loader.get_corridor_map_points()
+    if map_points:
+        import plotly.express as px_map
+        fig_map = px_map.scatter_geo(
+            map_points,
+            lat="lat",
+            lon="lon",
+            size="pair_count",
+            hover_name="name",
+            hover_data={"code": True, "pair_count": True, "lat": False, "lon": False},
+            scope="usa",
+            color_discrete_sequence=[COLORS["tier_high"]],
+        )
+        fig_map.update_geos(center={"lat": 31.0, "lon": -99.0}, projection_scale=4, showland=True, landcolor="#1a1f26")
+        fig_map.update_layout(
+            margin=dict(l=0, r=0, t=0, b=0),
+            height=350,
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig_map, width="stretch")
+    else:
+        st.info("No tracked corridors have a known map location yet.")
+
+st.divider()
+
 left, right = st.columns([3, 2])
 
 with left:

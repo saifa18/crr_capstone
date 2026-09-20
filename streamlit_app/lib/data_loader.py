@@ -94,3 +94,44 @@ def get_weather_zone_snapshot() -> list[dict]:
 @st.cache_data(ttl=86400)
 def get_weather_zone_seasonality() -> dict[str, list[dict] | None]:
     return weather_zones.trailing_12mo_seasonality_by_zone()
+
+
+def _settlement_point_coordinates() -> dict[str, tuple[float, float]]:
+    """Borrows each real hub/load-zone code's map location from the
+    weather zone it's associated with in weather_zones.py -- there's no
+    separate lat/lon table to maintain, and it stays consistent with
+    whatever zone mapping that module already documents."""
+    coords: dict[str, tuple[float, float]] = {}
+    for zone in weather_zones.WEATHER_ZONES:
+        for code in zone.hubs + zone.load_zones:
+            coords.setdefault(code, (zone.latitude, zone.longitude))
+    return coords
+
+
+@st.cache_data(ttl=3600)
+def get_corridor_map_points() -> list[dict]:
+    """One row per real hub/load-zone code appearing in the tracked top
+    pairs, with a map location and how many tracked pairs touch that
+    point. Points with no known coordinate (e.g. a resource-node code with
+    no weather-zone mapping) are omitted entirely rather than plotted at
+    (0, 0), which would be misleading."""
+    _, top_pairs = get_tracked_records()
+    coords = _settlement_point_coordinates()
+    counts: dict[str, int] = {}
+    for p in top_pairs:
+        for code in (p["source"], p["sink"]):
+            counts[code] = counts.get(code, 0) + 1
+
+    out = []
+    for code, count in counts.items():
+        if code not in coords:
+            continue
+        lat, lon = coords[code]
+        out.append({
+            "code": code,
+            "name": _settlement_point_name(code),
+            "lat": lat,
+            "lon": lon,
+            "pair_count": count,
+        })
+    return out
