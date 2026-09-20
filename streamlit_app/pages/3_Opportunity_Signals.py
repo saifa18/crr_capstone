@@ -7,7 +7,7 @@ from __future__ import annotations
 import streamlit as st
 
 from lib import data_loader
-from lib.theme import COLORS, configure_page, render_data_source_banner
+from lib.theme import configure_page, render_data_source_banner
 
 configure_page("Opportunity Signals")
 st.title("Opportunity Signals")
