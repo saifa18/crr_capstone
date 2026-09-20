@@ -7,7 +7,7 @@ from __future__ import annotations
 import streamlit as st
 
 from lib import data_loader
-from lib.theme import configure_page, render_data_source_banner
+from lib.theme import COLORS, configure_page, render_data_source_banner
 
 configure_page("Opportunity Signals")
 st.title("Opportunity Signals")
@@ -37,12 +37,16 @@ if search:
 
 st.write(f"{len(filtered)} of {len(scores)} tracked pairs")
 
-for s in filtered:
-    with st.expander(f"{s['source']} → {s['sink']}  —  {s['tier']} ({s['score']})"):
-        f1, f2, f3, f4 = st.columns(4)
-        f1.metric("Value", s["factors"]["value"]["score"])
-        f2.metric("Trend", s["factors"]["trend"]["score"])
-        f3.metric("Consistency", s["factors"]["consistency"]["score"])
-        f4.metric("Liquidity", s["factors"]["liquidity"]["score"])
-        for line in s["explanation"]:
-            st.write(f"- {line}")
+_TIER_DOT = {"High": "🟢", "Medium": "🟡", "Low": "⚪"}
+
+with st.container(border=True):
+    for s in filtered:
+        dot = _TIER_DOT.get(s["tier"], "⚪")
+        with st.expander(f"{dot} {s['source']} → {s['sink']}  —  {s['tier']} ({s['score']})"):
+            f1, f2, f3, f4 = st.columns(4)
+            f1.metric("Value", s["factors"]["value"]["score"])
+            f2.metric("Trend", s["factors"]["trend"]["score"])
+            f3.metric("Consistency", s["factors"]["consistency"]["score"])
+            f4.metric("Liquidity", s["factors"]["liquidity"]["score"])
+            for line in s["explanation"]:
+                st.write(f"- {line}")
