@@ -96,7 +96,7 @@ st.dataframe(
         for p in pair_participants[:15]
     ],
     hide_index=True,
-    width="stretch",
+    use_container_width=True,
 )
 
 if obligation_series:

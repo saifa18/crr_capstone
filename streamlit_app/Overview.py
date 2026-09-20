@@ -69,7 +69,7 @@ with st.container(border=True):
             height=350,
             paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_map, width="stretch")
+        st.plotly_chart(fig_map, use_container_width=True)
     else:
         st.info("No tracked corridors have a known map location yet.")
 
@@ -108,7 +108,7 @@ with right:
             plot_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=10, r=10, t=10, b=10),
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
 with st.container(border=True):
@@ -125,7 +125,7 @@ with st.container(border=True):
             for p in participants[:10]
         ],
         hide_index=True,
-        width="stretch",
+        use_container_width=True,
     )
 
 st.divider()
