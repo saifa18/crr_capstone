@@ -13,6 +13,14 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+from dotenv import load_dotenv
+
+# Loaded here (not just in backend/app/main.py) so the Streamlit app picks
+# up real credentials (e.g. ERCOT_API_*) when run standalone -- the whole
+# point of this app being a single process with no second server to boot.
+# override=False: a real environment variable set outside this file always
+# wins over whatever's in the .env file.
+load_dotenv(Path(__file__).resolve().parents[2] / "backend" / ".env", override=False)
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
 if str(_BACKEND_DIR) not in sys.path:
