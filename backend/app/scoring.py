@@ -157,8 +157,6 @@ def score_all_pairs(records: list[dict]) -> list[OpportunityScore]:
                 f"Value is {m['trend_direction']} -- last 12 months vs. prior 12 months "
                 f"changed {m['recent_vs_prior_year_pct']}%."
             )
-        else:
-            explanation.append("Not enough history yet for a reliable year-over-year trend read.")
         explanation.append(
             f"{round(consistency_s)}% of months cleared on the same side (positive/negative) "
             f"as the historical average, indicating {'high' if consistency_s >= 70 else 'moderate' if consistency_s >= 40 else 'low'} "

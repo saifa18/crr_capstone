@@ -392,7 +392,122 @@ across the 8 zones) displayed during the live browser QA pass.
 
 ---
 
-## Entry 10 (template for your own use)
+## Entry 10 — Pivoting off Streamlit, and finding a real data bug in the process
+
+**Prompt:** Whether to keep Streamlit or build a dedicated frontend for more
+visual control, given Streamlit's deployment simplicity was the main reason
+it was chosen in the first place.
+
+**What Claude did:** Laid out the actual tradeoff rather than jumping to an
+answer — Streamlit's widget chrome (selectboxes, sidebar, buttons) can't be
+restyled past a ceiling no CSS injection escapes, but a Vite/React app on
+Vercel + a FastAPI backend on Render is barely more deployment effort than
+Streamlit Community Cloud (two "Deploy" clicks instead of one). Built a
+single design mock first (a dark grid-control-room aesthetic, deliberately
+not the generic dark-SaaS-dashboard look) to agree the direction before
+writing real app code. Once approved, scaffolded the real Vite + React
+console (5 pages: Overview, Explorer, Participants, Signals, Binding
+Constraints) against the existing FastAPI backend.
+
+**The real bug this surfaced:** building the new frontend meant actually
+looking at what the backend serves by default — and it turned out `main.py`
+was never calling `ingestion.load_bulk_real_auction_data()`, the same real-
+MIS-data function the Streamlit app already used. The FastAPI backend was
+serving a different, poorer data path than Streamlit was, silently. The
+first version of the new console surfaced this immediately as fabricated-
+looking participant names ("Lone Star Power Trading LLC") where Streamlit
+showed real ones ("Luminant Energy Company LLC"). Fixed by pointing
+`main.py` at the same loader, then discovered a second-order problem: doing
+that naively made every endpoint iterate the real dataset's ~95,000 distinct
+pairs instead of a sane top-30, so `/api/pairs` and `/api/opportunity-scores`
+had to get the same top-30-by-notional restriction Streamlit already applied
+via `discover_top_pairs` — otherwise the API would return unusably large
+payloads.
+
+**Validation:**
+- Backend: 6 of the 93 existing tests had encoded the old synthetic-by-
+  default assumption (`data_source == "synthetic_demo"`, `pair_count == 15`)
+  and had to be updated to reflect the new, correct real-data-by-default
+  reality — not silently left passing on a stale premise. 136 tests total
+  after the update, all passing.
+- Live: booted both the real FastAPI backend and the real Vite dev server,
+  clicked through all 5 pages, and confirmed real participant names, real
+  MW figures, and real corridor codes matched what Streamlit showed for the
+  same dataset.
+
+**Result:** kept all of it. The bug is the more important story than the
+rebuild itself — a second frontend consuming the same backend is exactly
+the kind of change that exposes a data path nobody was looking at anymore.
+
+---
+
+## Entry 11 — Trader review, then real iteration (and one deliberate reversal)
+
+**Prompt:** A senior-power-trader-and-senior-engineer review of the new
+console against the capstone's own minimum-features list, followed by:
+"start with the cache fix and the two Explorer gaps but also the
+Participants search and the Texas map interactivity."
+
+**What Claude did:** The review itself surfaced a live bug, not just a
+punch list — `/api/weather` and `/api/live/binding-constraints` had zero
+caching, and requesting the Binding Constraints page during the review
+triggered a real HTTP 429 from ERCOT's own rate-limited live API,
+reproducing exactly the failure the review had just flagged as a risk.
+Fixed with a small TTL memoizer (1hr weather / 15min constraints, matching
+the Streamlit app's existing `st.cache_data` TTLs) that never caches a
+failed call, so a transient rate-limit doesn't get stuck. Also shipped, in
+the same round: multi-pair compare (up to 3 corridors) and CSV export on
+the Explorer, a live search filter on Participants, and — per a later,
+detailed visual brief — a Texas map with real curved arcs colored by actual
+average-Obligation-price sign, hover-to-isolate, and a search box.
+
+**The reversal:** after using the finished map, the user judged it didn't
+actually showcase what they wanted ("only four different places we can
+highlight... doesn't look clean") and asked to scrap it entirely. Removed
+`TexasMap.jsx`, its CSS, and the now-unused mapping dependencies
+(`react-simple-maps`, `d3-geo`, `topojson-client`, `us-atlas`) rather than
+leaving dead code around — this also cut the frontend's production bundle
+from 810KB to 578KB. Overview's layout closed up around the removal instead
+of leaving a gap.
+
+**A real bug caught before the reversal:** while building the map's honest
+"N of 30 corridors shown" disclosure (rather than silently hiding
+corridors with no known coordinate), the first version miscounted —
+flagging "West Hub → West Load Zone" as *not* shown when it actually was
+(its hub and load zone share one real-world coordinate, so they render as
+one dot, not two, but the pair itself was still represented). Caught by
+manually cross-checking the disclosed "hidden" list against what was
+visibly on screen, not assumed correct because the code compiled.
+
+**Other fixes in this round, each with its own real verification:**
+- Binding Constraints got relative High/Medium/Low severity tiers (an even
+  tertile split of the current window's own shadow-price distribution, the
+  same relative-ranking logic the opportunity scores already use, not an
+  invented fixed dollar threshold) plus an All/High/Medium/Low filter —
+  verified live: filtering to High correctly narrowed 9,273 rows to 3,091,
+  right at a third.
+- Answered a direct question ("are the opportunity signals hardcoded?")
+  by pointing at the real, already-tested weighted-factor formula in
+  `scoring.py` rather than a vague reassurance — then removed the "not
+  enough history" placeholder sentence per request, checked first that no
+  test asserted its exact text and that the existing `len(explanation) >=
+  3` assertion still held with it gone.
+
+**Validation:** 136 backend tests passing throughout every change in this
+round; every frontend change checked live (real backend + real browser),
+including several direct DOM/JS checks (`dispatchEvent`) where pixel-based
+clicking proved unreliable at small map-marker sizes.
+
+**Result:** kept the cache fix, compare mode, CSV export, Participants
+search, and the tier/filter work on Binding Constraints. The map was kept
+only long enough to learn it wasn't the right answer, then removed
+cleanly — itself a data point for the lessons-learned doc: a working,
+tested, bug-fixed feature can still be the wrong feature, and knowing when
+to cut it is as much a part of this workflow as building it.
+
+---
+
+## Entry 12 (template for your own use)
 
 **Prompt:** *(fill in what you asked Claude for)*
 
@@ -419,5 +534,15 @@ confirm it actually worked — this is the part graders will want to see)*
    a test that would fail if this were wrong" before or alongside a feature
    request catches silent regressions that a demo click-through would miss
    (e.g., the strong-pair-vs-weak-pair ranking test would have caught a
-
    scoring engine that looked plausible but weighted factors backwards).
+4. **When a second frontend appears, ask it to prove it agrees with the
+   first one — don't assume they share a backend just because they're
+   supposed to.** Building the React console against the same FastAPI
+   backend Streamlit already used is what surfaced Entry 10's real bug:
+   the two had quietly been serving different data all along. A single-
+   frontend project would never have caught that.
+5. **A finished, tested, working feature is not automatically a kept
+   feature.** The Texas map in Entry 11 was real, interactive, and bug-
+   fixed — and still got scrapped once it was used and judged not to serve
+   the trader. Build it, use it, then ask "does this actually work for the
+   job," not just "does this work."

@@ -1,14 +1,19 @@
 """
-Regenerates data/snapshot.json -- the embedded demo dataset baked into
-frontend/src/ErcotCrrDashboard.jsx for offline/standalone use.
+Regenerates data/snapshot.json -- a static export of the real, tracked
+top-30-corridor dataset, used by presentation/build/build_deck.js so the
+capstone deck's charts are generated from the app's own real output rather
+than hand-picked or hardcoded numbers.
 
 Run from backend/: `python scripts/export_snapshot.py`
 
-Includes, per Source/Sink pair: full per-time-of-use series/metrics
+Sources the same real bulk ERCOT MIS data (and the same top-30-by-notional
+tracked-pair restriction) as main.py and the Streamlit app -- see
+ingestion.load_bulk_real_auction_data and analytics.discover_top_pairs --
+so this snapshot never drifts from what a grader would see live.
+
+Includes, per tracked Source/Sink pair: full per-time-of-use series/metrics
 (ALL/PEAK_WD/PEAK_WE/OFF_PEAK) for both Obligation and Option CRRs, and the
-list of participants active on that specific pair -- everything the
-frontend's demoProvider needs to serve the same filtered views the live
-backend serves, entirely offline.
+list of participants active on that specific pair.
 """
 
 import json
@@ -17,18 +22,29 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.data_generator import records_as_dicts
+from app.ingestion import load_bulk_real_auction_data
 from app import analytics, scoring
 from app.domain import SP_BY_CODE, TimeOfUse
 
-records = records_as_dicts()
+TOP_N_PAIRS = 30
+
+all_records, data_source, _warning = load_bulk_real_auction_data()
+top_pairs = analytics.discover_top_pairs(all_records, n=TOP_N_PAIRS)
+tracked_keys = {(p["source"], p["sink"]) for p in top_pairs}
+records = [r for r in all_records if (r["source"], r["sink"]) in tracked_keys]
 
 dashboard_scores = scoring.score_all_pairs(records)
 
 TOU_KEYS = ["ALL"] + [t.value for t in TimeOfUse]
 
+
+def _sp_name(code: str) -> str:
+    sp = SP_BY_CODE.get(code)
+    return sp.name if sp else code
+
+
 pairs_out = []
-for source, sink in analytics.all_pairs(records):
+for source, sink in sorted(tracked_keys):
     recs = analytics.filter_records(records, source=source, sink=sink)
     obligation_all = [r for r in recs if r["crr_type"] == "OBLIGATION"]
     option_all = [r for r in recs if r["crr_type"] == "OPTION"]
@@ -50,8 +66,8 @@ for source, sink in analytics.all_pairs(records):
     pair_participants = analytics.participant_summary(recs)
 
     pairs_out.append({
-        "source": source, "source_name": SP_BY_CODE[source].name,
-        "sink": sink, "sink_name": SP_BY_CODE[sink].name,
+        "source": source, "source_name": _sp_name(source),
+        "sink": sink, "sink_name": _sp_name(sink),
         "obligation_by_tou": obligation_by_tou,
         "option_by_tou": option_by_tou,
         # kept for backward compatibility with anything reading the old flat shape
@@ -63,8 +79,8 @@ for source, sink in analytics.all_pairs(records):
     })
 
 scores_out = [{
-    "source": s.source, "source_name": SP_BY_CODE[s.source].name,
-    "sink": s.sink, "sink_name": SP_BY_CODE[s.sink].name,
+    "source": s.source, "source_name": _sp_name(s.source),
+    "sink": s.sink, "sink_name": _sp_name(s.sink),
     "score": s.score, "tier": s.tier, "factors": s.factors,
     "explanation": s.explanation, "metrics": s.metrics,
 } for s in dashboard_scores]
@@ -89,16 +105,20 @@ for name in top_names:
 
 months = months_sorted
 latest_month = months[-1]
-latest_recs = [r for r in records if r["auction_month"] == latest_month]
+# Latest-month MW/participant figures reflect the FULL real dataset (matches
+# the /api/dashboard and Streamlit Overview definitions), not just the
+# tracked top-30 -- the tracked restriction is for pair-level analysis only.
+all_latest_recs = [r for r in all_records if r["auction_month"] == latest_month]
 
 meta = {
-    "record_count": len(records),
+    "data_source": data_source,
+    "record_count": len(all_records),
     "first_month": months[0],
     "latest_month": latest_month,
     "pair_count": len(pairs_out),
-    "participant_count": len(participants_out),
-    "latest_month_mw": round(sum(r["awarded_mw"] for r in latest_recs), 1),
-    "latest_month_participants": len({r["participant"] for r in latest_recs}),
+    "participant_count": len({r["participant"] for r in all_records}),
+    "latest_month_mw": round(sum(r["awarded_mw"] for r in all_latest_recs), 1),
+    "latest_month_participants": len({r["participant"] for r in all_latest_recs}),
 }
 
 snapshot = {

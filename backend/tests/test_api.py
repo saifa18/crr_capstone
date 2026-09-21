@@ -10,8 +10,14 @@ def test_meta_endpoint():
     assert r.status_code == 200
     body = r.json()
     assert body["record_count"] > 0
-    assert body["data_source"] == "synthetic_demo"
-    assert body["pair_count"] == 15
+    # This backend now reads the same bundled real ERCOT MIS data as the
+    # Streamlit app (see main.py's _get_data()) rather than the synthetic
+    # generator, whenever that bundled data is present -- as it is here.
+    assert body["data_source"] == "ercot_mis_real"
+    # ~95,000 distinct real Source/Sink pairs, not the 15 illustrative
+    # synthetic ones -- exact count isn't stable across data refreshes,
+    # so assert order-of-magnitude instead of an exact number.
+    assert body["pair_count"] > 1000
 
 
 def test_dashboard_endpoint_shape():
@@ -33,7 +39,12 @@ def test_dashboard_tier_distribution_sums_to_pair_count():
     body = r.json()
     dist = body["tier_distribution"]
     assert set(dist.keys()) == {"High", "Medium", "Low"}
-    assert sum(dist.values()) == body["tracked_pair_count"]
+    # A tracked pair with real activity but zero OBLIGATION-type records
+    # (e.g. Option-only trading on that path) has no economic-value signal
+    # to score and is skipped -- see scoring.score_all_pairs, `if
+    # m["average"] is None: continue`. So this can be less than, but never
+    # more than, the tracked pair count.
+    assert 0 < sum(dist.values()) <= body["tracked_pair_count"]
     assert all(v >= 0 for v in dist.values())
 
 
@@ -55,7 +66,10 @@ def test_pairs_endpoint_lists_all_pairs():
     r = client.get("/api/pairs")
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 15
+    # The top 30 tracked corridors by real notional activity, not every
+    # one of the real dataset's ~95,000 distinct pairs -- see _tracked()
+    # in main.py.
+    assert len(body) == 30
     assert all("average_obligation_price" in p for p in body)
 
 
@@ -70,7 +84,10 @@ def test_pair_series_endpoint_valid_pair():
 
 
 def test_pair_series_endpoint_filters_by_crr_type():
-    r = client.get("/api/pairs/HB_WEST/HB_HOUSTON/series", params={"crr_type": "OBLIGATION"})
+    # HB_WEST/HB_HOUSTON's real activity happens to be Option-only, so it
+    # would 404 under an Obligation filter -- HB_WEST/LZ_WEST is a tracked
+    # pair with real records of both types.
+    r = client.get("/api/pairs/HB_WEST/LZ_WEST/series", params={"crr_type": "OBLIGATION"})
     assert r.status_code == 200
 
 
@@ -106,7 +123,10 @@ def test_opportunity_scores_endpoint():
     r = client.get("/api/opportunity-scores")
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 15
+    # Scored over the 30 tracked pairs, minus any that are Option-only and
+    # so have no Obligation-based value signal to score (see the tier-sum
+    # test above) -- so this is bounded, not exact.
+    assert 0 < len(body) <= 30
     for s in body:
         assert s["tier"] in ("Low", "Medium", "High")
         assert 0 <= s["score"] <= 100
@@ -149,8 +169,10 @@ def test_system_status_reflects_sql_not_configured_by_default(monkeypatch):
     monkeypatch.delenv("SQL_SERVER_DATABASE", raising=False)
     r = client.get("/api/system/status")
     assert r.json()["sql_configured"] is False
-    # with nothing else configured either, the synthetic generator serves it
-    assert r.json()["active_data_source"] == "synthetic_demo"
+    # with SQL not configured, the bundled real ERCOT MIS data serves it
+    # (see main.py's _get_data()) -- not the synthetic generator, since
+    # that bundled real data ships in this repo's data/raw/crr_auction/.
+    assert r.json()["active_data_source"] == "ercot_mis_real"
 
 
 def test_pair_participants_endpoint():
@@ -273,8 +295,12 @@ def test_live_binding_constraints_success_with_mocked_client(monkeypatch):
     class FakeClient:
         def get_dam_shadow_prices(self, date_from, date_to, page=1, size=1000):
             return {
-                "fields": [{"name": "constraintName"}, {"name": "shadowPrice"}],
-                "data": [["RN_LIMIT_WEST_345", 42.1]],
+                "fields": [
+                    {"name": "deliveryDate"}, {"name": "hourEnding"}, {"name": "constraintName"},
+                    {"name": "contingencyName"}, {"name": "shadowPrice"}, {"name": "fromStation"},
+                    {"name": "toStation"},
+                ],
+                "data": [["2026-01-01T00:00:00", 14, "RN_LIMIT_WEST_345", "BASE CASE", 42.1, "STA_A", "STA_B"]],
                 "_meta": {"totalPages": 1},
             }
 
@@ -283,4 +309,15 @@ def test_live_binding_constraints_success_with_mocked_client(monkeypatch):
     r = client.get("/api/live/binding-constraints", params={"date_from": "2026-01-01", "date_to": "2026-01-02"})
     assert r.status_code == 200
     body = r.json()
-    assert body["constraints"] == [{"constraintName": "RN_LIMIT_WEST_345", "shadowPrice": 42.1}]
+    # Shaped into the same named, snake_case fields as the Streamlit app's
+    # identical helper -- see main.py's live_binding_constraints docstring.
+    assert body["constraints"] == [{
+        "delivery_date": "2026-01-01",
+        "hour_ending": 14,
+        "constraint_name": "RN_LIMIT_WEST_345",
+        "contingency_name": "BASE CASE",
+        "shadow_price": 42.1,
+        "from_station": "STA_A",
+        "to_station": "STA_B",
+    }]
+    assert body["truncated"] is False

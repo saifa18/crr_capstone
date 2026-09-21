@@ -8,8 +8,8 @@ analytics, and an explainable Low/Medium/High opportunity signal.
 > is a transparent composite of historical descriptive statistics — never a
 > price prediction or a bidding recommendation.
 
-> **Sign-off:** this build has been reviewed from three angles — Head of
-> Software Engineering, Senior Power Trader, and Head of Frontend — against
+> **Sign-off:** this build has been reviewed from three angles — Senior
+> Software Engineer, Senior Power Trader, and Head of Frontend — against
 > the project's own minimum-features criteria. See
 > `docs/triple_check_review.md` for the full pass/gap breakdown.
 
@@ -20,106 +20,107 @@ ercot-crr-analytics/
 ├── backend/                  Python/FastAPI service — the real logic
 │   ├── app/
 │   │   ├── domain.py          ERCOT hub/load-zone/node reference data
-│   │   ├── data_generator.py  Seeded synthetic CRR auction data generator
+│   │   ├── data_generator.py  Seeded synthetic CRR auction data generator (fallback only)
 │   │   ├── db.py              SQL Server connection layer (env-var configured, see below)
-│   │   ├── ingestion.py       Loader: SQL Server, else real ERCOT CSVs, else synthetic fallback
+│   │   ├── ingestion.py       Loader: real bundled ERCOT MIS data by default, else SQL
+│   │   │                      Server, else dropped CSVs, else synthetic fallback
 │   │   ├── analytics.py       Pure functions: avg/min/max/volatility/trend/downside-risk
 │   │   ├── scoring.py         Explainable Low/Medium/High opportunity score
 │   │   ├── ercot_live.py      Real ERCOT Public API client (live DAM prices, free to register)
 │   │   ├── live_congestion.py Turns live DAM prices into real Source/Sink congestion value
 │   │   └── main.py            FastAPI routes
-│   ├── tests/                 93 pytest tests covering all of the above
+│   ├── tests/                 136 pytest tests covering all of the above
 │   ├── scripts/
-│   │   ├── export_snapshot.py           Regenerates data/snapshot.json (run after any analytics change)
+│   │   ├── export_snapshot.py           Regenerates data/snapshot.json (feeds the presentation deck)
+│   │   ├── fetch_real_ercot_data.py     Refreshes the bundled real MIS data described below
 │   │   └── create_sql_server_schema.sql T-SQL to create the expected SQL Server table
 │   ├── .env.example            Copy to .env -- every environment variable this backend reads
 │   ├── requirements.txt
 │   └── pytest.ini
-├── frontend/
-│   └── src/
-│       ├── component_body.jsx      React UI — connects to a live backend when available,
-│       │                           falls back to the embedded snapshot otherwise
-│       └── ErcotCrrDashboard.jsx   component_body.jsx + an embedded data snapshot,
-│                                   ready to run standalone (this is the file
-│                                   shared as the in-chat interactive artifact)
+├── frontend/                 Vite + React console — the primary, deployable UI
+│   ├── src/
+│   │   ├── App.jsx             Nav rail + routes
+│   │   ├── api.js              Fetch client against the FastAPI backend
+│   │   ├── styles.css          The console's design system (dark, hairline-bordered)
+│   │   └── pages/               Overview, Explorer, Participants, Signals, BindingConstraints
+│   ├── .env.example            Copy to .env.local -- points the console at a running backend
+│   └── package.json
 ├── data/
-│   ├── snapshot.json          JSON export of the synthetic dataset (for the demo UI)
-│   └── raw/                   Drop real ERCOT MIS CRR Auction Result CSVs here
+│   ├── snapshot.json          Static export of the real tracked dataset (feeds the deck's charts)
+│   ├── raw/crr_auction/       Bundled real ERCOT CRR Monthly Auction Results (see below)
+│   └── reference/participants.csv   Bundled real ERCOT Market Participants List
 ├── docs/
-│   ├── requirements.md                    Full requirements doc (functional + non-functional), v1.3
-│   ├── prompt_journal.md                  AI prompt evolution & validation log, 8 entries
-│   ├── triple_check_review.md             Head of SWE / Senior Trader / Head of Frontend sign-off
+│   ├── requirements.md                    Full requirements doc (functional + non-functional)
+│   ├── prompt_journal.md                  AI prompt evolution & validation log, 12 entries
+│   ├── triple_check_review.md             Multi-round persona sign-off log
 │   ├── copilot_sql_connection_prompt.md   Ready-to-paste prompt for connecting a real SQL Server
-│   └── lessons_learned_and_future_work.md
+│   ├── lessons_learned_and_future_work.md
+│   └── superpowers/                       Dated design specs/plans from earlier build rounds
 └── presentation/
-    └── ERCOT_CRR_Capstone_Presentation.pptx   60-minute presentation outline/deck (v1.1 feature set --
-                                                not yet updated for v1.3, see lessons-learned)
+    ├── ERCOT_CRR_Capstone_Presentation.pptx   60-minute presentation deck
+    └── build/                                  Node scripts that generate the deck above --
+                                                  `node make_icons.js && node build_deck.js`
+                                                  (run from presentation/build/, needs
+                                                  `npm install pptxgenjs sharp react react-dom react-icons`)
 ```
 
-## Quick start — backend + tests
+## Quick start — backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
-python -m pytest -q          # 93 tests, all passing
+python -m pytest -q          # 136 tests, all passing
 uvicorn app.main:app --reload --port 8000
 # then browse http://localhost:8000/docs for interactive Swagger UI
 ```
 
-Key endpoints: `GET /api/dashboard`, `/api/pairs`,
+No environment variables are required for this to work with real data —
+the backend reads the bundled real ERCOT auction data described below by
+default. Key endpoints: `GET /api/dashboard`, `/api/pairs`,
 `/api/pairs/{source}/{sink}/series` (accepts `crr_type`/`time_of_use`
 filters and `?format=csv`), `/api/pairs/{source}/{sink}/participants`,
 `/api/participants`, `/api/participants/{name}`, `/api/opportunity-scores`,
-`/api/meta`, `/health` — plus the live-data endpoints below.
+`/api/hot-paths`, `/api/corridor-map`, `/api/weather`, `/api/meta`,
+`/health` — plus the live-data endpoints described further down.
 
-## Quick look — the UI
-
-`frontend/src/ErcotCrrDashboard.jsx` is a self-contained React component
-(Recharts + Lucide icons) that **talks to a real backend when one is
-reachable, and falls back to an embedded demo snapshot when it isn't** —
-it's not just a static mockup. Four views: **Overview** (recent-auction
-summary, opportunity-tier distribution across *all* tracked pairs, a
-trailing-12-month market MW trend, and a live weather panel for the
-regions behind the tracked corridors — see "Live weather context" below),
-**Source/Sink Explorer** (Peak-Weekday/Peak-Weekend/Off-Peak/All filter,
-Obligation vs. Option, up to 3-pair overlay comparison, a trailing-12-month
-average alongside the all-time average, a seasonality strip by calendar
-month, the list of participants active on that specific pair, and one-click
-CSV download), **Participants** (activity + notional ranking), and
-**Opportunity Signals** (every pair's score with its factor breakdown,
-filterable by tier and searchable by hub/zone name).
-
-**Connecting it to a real backend:** at the top of the app is a connection
-bar. Run the backend (`uvicorn app.main:app --port 8000`), type its URL
-(default `http://localhost:8000`) into the connection bar, and click
-Connect — the whole UI switches to live data with no code changes, because
-every view is written against one `provider` interface
-(`demoProvider`/`liveProvider` in `component_body.jsx`) rather than reading
-the embedded snapshot directly. Disconnect returns to the demo dataset.
-**Note:** browser sandboxing inside Claude's chat preview may block this
-connection even though the code is correct and tested against a real
-running server (see "What was and wasn't validated" below) — it will work
-when this file is run as a normal web app (see "Running as a standalone
-app" below).
-
-### Running as a standalone app
-
-This is plain React + Recharts + Lucide with no build-tool-specific syntax,
-so it drops into any React setup:
+## Quick start — the console (frontend)
 
 ```bash
-npm create vite@latest ercot-crr-ui -- --template react
-cd ercot-crr-ui
-npm install recharts lucide-react
-# replace src/App.jsx with frontend/src/ErcotCrrDashboard.jsx's contents
-npm run dev
+cd frontend
+npm install
+cp .env.example .env.local     # points VITE_API_BASE_URL at your backend
+npm run dev                    # http://localhost:5173, with the backend running on :8000
 ```
 
-Regenerate `data/snapshot.json` after any backend analytics change with
-`cd backend && python scripts/export_snapshot.py`, then re-paste the new
-`const DATA = {...}` block at the top of `ErcotCrrDashboard.jsx` (or just
-keep `component_body.jsx` and `data/snapshot.json` separate if you're
-running this as a real app rather than a single-file artifact).
+Five pages, all reading real data from the backend above:
+
+- **Overview** — latest auction month, MW awarded (with a prior-month
+  delta), active participants, tracked corridors, hot paths, opportunity
+  tier distribution, top participants by notional, and a live weather panel
+  for the regions behind the tracked corridors (see "Live weather context"
+  below).
+- **Source/Sink Explorer** — pick a tracked corridor (or compare up to 3 at
+  once), Peak-Weekday/Peak-Weekend/Off-Peak/All filtering, Obligation vs.
+  Option overlay, the participants active on that pair, and CSV export of
+  whatever's charted.
+- **Participants** — a searchable, scrollable list of every real CRR
+  Account Holder active on a tracked corridor, with a detail pane (net MW,
+  notional, distinct corridors, certificates, recent activity) that updates
+  in place as you click through the list.
+- **Opportunity Signals** — every tracked corridor's Low/Medium/High score,
+  filterable by tier and searchable by hub/zone name, each with its four
+  factor sub-scores and a plain-language explanation.
+- **Binding Constraints** — real, live ERCOT transmission constraints for a
+  trailing 7/14/30-day window, with a "most active constraints" ranking,
+  relative High/Medium/Low severity tiers, and search/sort/filter on the
+  full table — a separate, real-time clock from the settled auction data
+  shown elsewhere, never merged with it.
+
+The console always talks to a real backend over `fetch` (`VITE_API_BASE_URL`
+in `.env.local`) — there's no embedded-snapshot/offline mode. To build it
+for deployment: `npm run build` (outputs `frontend/dist/`), deployable to
+any static host (Vercel, Netlify, GitHub Pages, ...) as long as it can reach
+a running instance of the backend above.
 
 ## Real ERCOT CRR auction data (bundled, no download required)
 
@@ -129,14 +130,17 @@ and the real ERCOT Market Participants List (`data/reference/participants.csv`,
 521 unique companies, 377 appearing in the bundled auction data), fetched
 directly from ERCOT's public, unauthenticated legacy MIS servlet endpoints
 -- no browser session, no login, no MIS account required. This corrects an
-earlier assumption in this project (see `docs/lessons_learned_and_future_work.md`)
-that this data could only be reached through the modern, JS-gated
-`mis.ercot.com` file browser.
+earlier assumption in this project (see `docs/lessons_learned_and_future_work.md`
+and `docs/prompt_journal.md` Entry 9) that this data could only be reached
+through the modern, JS-gated `mis.ercot.com` file browser.
 
-The Streamlit app (see below) reads this bundled data directly, so it
-works the moment the project folder is copied or unzipped somewhere else
--- no fetch step required. To refresh it after a new monthly auction
-posts:
+**Both the backend and the console read this bundled data by default** —
+`ingestion.load_bulk_real_auction_data()` is the single entry point both
+`main.py` and `data/snapshot.json`'s export script use, so there's one real
+dataset behind everything in this repo, not two that could quietly drift
+apart (see `docs/prompt_journal.md` Entry 10 for the bug this exact
+divergence caused, and how it was caught). To refresh the bundled data
+after a new monthly auction posts:
 
 ```bash
 cd backend
@@ -147,47 +151,34 @@ This is idempotent -- it only downloads auction months not already present
 locally, and always refreshes the participant registry (a small file,
 updated daily by ERCOT).
 
-The FastAPI backend's own CSV tier is unaffected by this bundled data --
-see `backend/app/ingestion.py`'s module docstring for why it's kept
-completely separate (in short: so this bundled real data can never change
-the FastAPI backend's existing, tested behavior). If you have your own
-real ERCOT CRR CSVs and want the FastAPI backend specifically to use them,
-drop them into `data/raw/` directly (not `data/raw/crr_auction/`) as
-before.
+Every pair-level view (the Explorer's corridor list, Opportunity Signals,
+Participants) works off the top 30 corridors by real notional activity, not
+the full ~95,000 distinct pairs in the raw data — see
+`analytics.discover_top_pairs`. `/api/meta` and `/api/system/status` expose
+the full raw counts if you need them.
 
-## Quick start -- Streamlit (the primary, shareable app)
+## Using your own ERCOT CRR auction data files (optional)
 
-```bash
-pip install -r streamlit_app/requirements.txt
-streamlit run streamlit_app/Overview.py
-```
-
-This is a single process, no separate backend server to boot: it imports
-`backend/app/{ingestion,analytics,scoring,domain,weather_zones}.py`
-directly and reads the bundled real data described above. Four pages:
-Overview (dashboard, Hot Paths, opportunity tiers, top participants,
-weather-by-zone), Source/Sink Explorer, Participants (with a per-participant
-Strategy breakdown), and Opportunity Signals.
-
-**Deploying it as a shareable link (Streamlit Community Cloud, free):**
-1. Push this repo to a GitHub repo you own.
-2. Go to https://share.streamlit.io, sign in, click "New app."
-3. Point it at your repo, branch `main`, and main file path
-   `streamlit_app/Overview.py`. Streamlit Cloud auto-detects
-   `streamlit_app/requirements.txt`. Click Deploy.
-
-No environment variables or secrets are required for this to work --
-everything it reads is bundled in the repo.
+If you have your own real ERCOT CRR Auction Results CSVs from
+`ercot.com/mp/data-products` (e.g., **NP7-802-M** for Long-Term or
+**NP7-803-M** for Monthly Auction Results — including Source, Sink, CRR
+type, clearing price, and CRR Account Holder): drop them into `data/raw/`
+directly (not `data/raw/crr_auction/`, which is reserved for the bundled
+real data described above). This is a separate, lower-priority tier used
+only by `ingestion.load_records()` (SQL Server, then this flat-CSV tier,
+then synthetic) — see that module's docstring for exactly how the two
+loaders relate.
 
 ## Live ERCOT data (real, free, API-based)
 
 Beyond the bundled CRR auction data above, this project also integrates
 **ERCOT's real Public Data API** (`api.ercot.com`) — a genuine, separate,
 free-to-register REST API for live market data, distinct from the
-JS-gated MIS file browser and the legacy servlet that now supplies the
-bundled data. It does not expose CRR auction awards, but it does expose
-real, live Day-Ahead Market settlement point prices and the binding
-transmission constraints behind them, and this project uses both.
+JS-gated MIS file browser and the legacy servlet that supplies the bundled
+data. It does not expose CRR auction awards, but it does expose real, live
+Day-Ahead Market settlement point prices and the binding transmission
+constraints behind them, and this project uses both — the latter powers
+the console's Binding Constraints page.
 
 **Why this is legitimate CRR-relevant data, not a workaround:** a
 Point-To-Point (PTP) Obligation CRR pays its holder exactly
@@ -208,6 +199,8 @@ happened on the grid rather than what a bidder guessed weeks earlier.
    export ERCOT_API_PASSWORD="your apiexplorer.ercot.com password"
    export ERCOT_API_SUBSCRIPTION_KEY="the subscription key from step 2"
    ```
+   (or put them in `backend/.env` — see `backend/.env.example`; that file
+   is gitignored, so your real credentials never get committed)
 4. `GET /api/live/status` confirms it's configured; the endpoints below then
    pull real, live data on every call.
 
@@ -217,57 +210,44 @@ happened on the grid rather than what a bidder guessed weeks earlier.
 |---|---|
 | `GET /api/live/status` | Whether live credentials are configured on this server |
 | `GET /api/pairs/{source}/{sink}/live-lmp-spread?months_back=24` | Real DAM price spread for that pair, fetched and aggregated just now, run through the exact same tested `analytics.py` metrics as everything else |
-| `GET /api/live/binding-constraints?date_from=...&date_to=...` | The actual named transmission constraint(s) driving congestion in that window, straight from ERCOT's shadow-price data — real "why," not a statistical guess |
+| `GET /api/live/binding-constraints?date_from=...&date_to=...` | The actual named transmission constraint(s) driving congestion in that window, straight from ERCOT's shadow-price data — real "why," not a statistical guess. Cached 15 minutes and paginated up to 15,000 rows; powers the console's Binding Constraints page. |
 
-Live data is only available for real ERCOT hub/load-zone codes (the same
-ones this project already uses for the demo, e.g. `HB_WEST`, `HB_HOUSTON`,
-`LZ_AEN`) — the project's small set of illustrative synthetic resource-node
-pairs (`PANHANDLE_WIND_RN`, etc., clearly labeled as such in `domain.py`)
-don't resolve against ERCOT's live systems and are rejected with a clear
-422 if requested.
+Live data is only available for real ERCOT hub/load-zone codes — the
+project's small set of illustrative synthetic resource-node pairs
+(`PANHANDLE_WIND_RN`, etc., clearly labeled as such in `domain.py`) don't
+resolve against ERCOT's live systems and are rejected with a clear 422 if
+requested.
 
 **Known limitation, disclosed upstream by ERCOT itself and by third-party
 clients:** this API is an explicit work-in-progress and has documented
-intermittent reliability issues (timeouts/500s under load — see
-[ercot/api-specs discussion #124](https://github.com/ercot/api-specs/discussions/124)).
-`ercot_live.py` retries with backoff and surfaces a clear, actionable error
-rather than hanging or failing silently; see its module docstring for
-specifics.
+intermittent reliability issues (timeouts/429s/500s under load — see
+[ercot/api-specs discussion #124](https://github.com/ercot/api-specs/discussions/124),
+and this project's own `docs/prompt_journal.md` Entry 11 for a real 429
+hit and fixed during review). `ercot_live.py` retries with backoff and
+surfaces a clear, actionable error rather than hanging or failing
+silently; see its module docstring for specifics.
 
-**What was and wasn't validated from this project's build environment:**
-that environment's own network egress is allowlisted to a fixed set of
-package-registry domains and does not include `api.ercot.com` or
-`ercotb2c.b2clogin.com`, so a real end-to-end login could not be performed
-there. What *was* verified: the real FastAPI server boots and its
+**What was and wasn't validated from this project's original build
+environment:** that environment's own network egress was allowlisted to a
+fixed set of package-registry domains and did not include `api.ercot.com`,
+so a real end-to-end login could not be performed from inside it at the
+time. What *was* verified there: the real FastAPI server boots and its
 `/api/live/status`, 501 ("not configured"), and 422 ("ineligible pair")
-paths behave correctly; and, with placeholder credentials, the client was
-confirmed to make a genuine HTTPS request to ERCOT's real token URL and
-degrade cleanly (a `502` to the API caller, not a crash or a hang) when
-that request is rejected. All request/response parsing logic is covered by
-27 unit tests mocked against ERCOT's documented and forum-confirmed
-response shapes. **A genuine live pull with real credentials has not been
-performed and should be your first check after registering.**
-
-**Why the ERCOT-specific live endpoints (LMP spread, binding constraints)
-aren't exposed directly in the UI:** they require the three
-`ERCOT_API_*` environment variables above, on top of the base backend
-connection described in "Quick look — the UI." The UI's connection bar
-does let you point the whole app at a real running backend — that part
-works today — but wiring the ERCOT-specific endpoints into the Explorer as
-an additional overlay is still open (see `docs/requirements.md` and
-`lessons_learned_and_future_work.md`). Either way, this backend capability
-is real and fully tested (27 tests across `ercot_live.py`/
-`live_congestion.py` plus the endpoint tests in `test_api.py`) and callable
-today via `uvicorn` + the three environment variables — see its Swagger UI
-at `/docs`.
+paths behave correctly; and, with placeholder credentials, the client made
+a genuine HTTPS request to ERCOT's real token URL and degraded cleanly (a
+`502`, not a crash). All request/response parsing logic is covered by unit
+tests mocked against ERCOT's documented and forum-confirmed response
+shapes. In later sessions, real authenticated calls were made successfully
+against the live API from a different environment — see
+`docs/prompt_journal.md` for details.
 
 ## Live weather context (genuinely live, verified honestly)
 
-The Overview tab includes a weather panel for the four real-world regions
-behind the tracked corridors (West Texas/Permian, Texas Panhandle, Houston/
-Gulf Coast, North Texas/DFW), fetched from **Open-Meteo**
-(`api.open-meteo.com`) directly in the browser on every load — no API key,
-no signup, `Access-Control-Allow-Origin: *`.
+The console's Overview page includes a weather panel for the real-world
+regions behind the tracked corridors, fetched server-side from
+**Open-Meteo** (`api.open-meteo.com`) via `GET /api/weather` — no API key,
+no signup. Cached an hour on the backend (matches the cadence weather
+actually changes at, and avoids hitting Open-Meteo on every page load).
 
 **Why weather, and why here:** wind output at West Texas/Panhandle and
 temperature-driven AC load at Houston/DFW are the actual physical drivers
@@ -275,33 +255,17 @@ of the congestion this app's Source/Sink pairs measure — not a random
 enrichment. The panel is explicitly framed as context, not a forecast of
 CRR value or an input to the opportunity score.
 
-**Why Open-Meteo specifically, and how that was checked before building
-anything:** unlike ERCOT's OAuth-based Public API, Open-Meteo is a plain
-`GET` request with no auth headers and an open CORS policy — confirmed via
-a working browser `fetch()` code sample in search results before writing
-any integration code, precisely because that combination (no key, no
-custom headers, wildcard CORS) is the profile most likely to survive a
-strict browser sandbox's content-security policy.
-
-**What was and wasn't verified:** the panel fails open — loading, then
-either real data or a visible, honest error message, never a blank box.
-Tested directly (not assumed) whether this project's own build sandbox
-could reach Open-Meteo: it could not (`Host not in allowlist:
-api.open-meteo.com` — the same category of restriction that affects the
-ERCOT domain, see above). That means the live weather fetch has **not**
-been confirmed working end-to-end from this specific environment. It is
-expected to work when this app runs as a normal deployed page (a different
-runtime with a different, and typically much less restrictive, network
-policy than this build sandbox's own tool access) — but that expectation
-is stated as an expectation, not a verified fact.
+**What was and wasn't verified:** the panel fails open — either real data
+or a visible, honest error message per zone, never a blank box. Confirmed
+live: the backend fetches real current temperatures/wind speeds from
+Open-Meteo and the console renders them correctly.
 
 ## Connecting to a real SQL Server database (the production data path)
 
-The backend can read the full auction/participant dataset (Dashboard,
-Participants, Opportunity Signals) directly from a real SQL Server
-database instead of the synthetic demo or CSV files — this is the
-intended way to run this against real ERCOT data once you have it loaded
-somewhere. **The database does not need to be on the same machine as the
+The backend can read the full auction/participant dataset directly from a
+real SQL Server database instead of the bundled real data or the synthetic
+fallback — useful if your organization already loads ERCOT data into a
+warehouse. **The database does not need to be on the same machine as the
 backend** — this is built entirely around environment variables, so the
 backend can run on one machine and point at a SQL Server on another.
 
@@ -338,52 +302,40 @@ backend can run on one machine and point at a SQL Server on another.
    etc.) and the backend automatically fell back to CSV files or the
    synthetic demo rather than crashing.
 
+Note: `main.py`'s primary data path is `ingestion.load_bulk_real_auction_data()`
+(the bundled real MIS data described above), which is tried before this
+SQL tier only falls back to it. If you want SQL Server to take priority
+over the bundled real data for the console/API, point `ingestion.load_records()`
+at it directly (see that module's docstring) or remove/relocate
+`data/raw/crr_auction/`.
+
 ### Why this degrades safely instead of breaking the app
 
 A misconfigured or temporarily-unreachable SQL Server never takes the
-whole backend down. `ingestion.load_records()` tries SQL first, then real
-CSV files in `data/raw/`, then the synthetic generator — each tier only
-used if the one before it isn't configured or fails, and a failure is
-always reported (via `data_source_warning` on `/api/meta`,
-`/api/dashboard`, and `/api/system/status`, and surfaced as a visible
-banner in the UI) rather than silently substituting different data and
+whole backend down — each tier only used if the one before it isn't
+configured or fails, and a failure is always reported (via
+`data_source_warning` on `/api/meta`, `/api/dashboard`, and
+`/api/system/status`) rather than silently substituting different data and
 looking fine. An unreachable host also fails in a few seconds, not the
 60+-second OS default, via `SQL_SERVER_CONNECT_TIMEOUT_SECONDS`.
 
-## Using your own ERCOT CRR auction data files (optional)
+## Why synthetic data exists, and how it was built responsibly
 
-If you have your own real ERCOT CRR Auction Results CSVs from
-`ercot.com/mp/data-products` (e.g., **NP7-802-M** for Long-Term or
-**NP7-803-M** for Monthly Auction Results — including Source, Sink, CRR
-type, clearing price, and CRR Account Holder) and want the FastAPI backend
-specifically to use them: drop them into `data/raw/` (not `data/raw/crr_auction/`,
-which is reserved for the bundled real data described earlier). On next backend
-start, `ingestion.py` will detect them (column-matched case-insensitively
-against ERCOT's published header names) and use them automatically instead
-of the synthetic generator — no code changes required. The analytics and
-scoring modules are 100% agnostic to where the records came from. This is the
-second-priority data source, used only if SQL Server isn't configured (see
-"Connecting to a real SQL Server database" above).
-
-## Why synthetic data, and how it was built responsibly
+Synthetic data is now strictly a fallback — real bundled data is the
+default, described above — but it's still there for a reason: the app
+should never fully break just because `data/raw/crr_auction/` is missing
+or the real registry can't be parsed.
 
 - Every synthetic record is real-hub-named (`HB_NORTH`, `HB_WEST`,
-  `HB_HOUSTON`, `LZ_AEN`, ...) but `is_synthetic: true`-tagged, and the UI
-  shows a persistent banner saying so — this project never presents
-  synthetic numbers as if they were ERCOT's real historical settlements.
+  `HB_HOUSTON`, `LZ_AEN`, ...) but `is_synthetic: true`-tagged, and the API
+  surfaces which tier is actually serving data (`data_source` on
+  `/api/meta`/`/api/dashboard`/`/api/system/status`) — this project never
+  presents synthetic numbers as if they were ERCOT's real historical
+  settlements.
 - **Participant names are fictional — but only in this synthetic fallback
   path.** "Lone Star Power Trading LLC," "Permian Basin Energy Partners,"
   and the dozen or so others in `data_generator.py` are made-up
-  placeholder company names, not real ERCOT market participants. This
-  fallback only runs when no real data source is available. The Streamlit
-  app (see "Quick start — Streamlit" above) uses real CRR Account Holder
-  names by default, from the bundled real participant registry. The
-  FastAPI backend's own flat-CSV/SQL tiers pick up real names the same way
-  once pointed at real data (a real database load, or real CSVs — see
-  "Connecting to a real SQL Server database" and "Using your own ERCOT CRR
-  auction data files" above); ERCOT's live Public API has no
-  participant-level endpoint at all (see "Live ERCOT data" above), so that
-  path never carries participant names either way.
+  placeholder company names, not real ERCOT market participants.
 - The price process is a **seeded, fully deterministic** random walk
   (`SEED` in `data_generator.py`) with pair-specific base congestion
   levels, summer/winter seasonal premiums, and a few illustrative
@@ -391,8 +343,8 @@ second-priority data source, used only if SQL Server isn't configured (see
   seasonality and locational spread real ERCOT congestion shows), not as a
   claim of historical accuracy for any specific month.
 - See `docs/requirements.md` §6 for the full data-sourcing disclosure and
-  `docs/prompt_journal.md` Entry 1 for how this was verified before being
-  designed around.
+  `docs/prompt_journal.md` Entries 1 and 9 for how this was verified
+  before, and re-verified after, being designed around.
 
 ## Running the analytics/scoring logic outside the API
 
@@ -400,18 +352,36 @@ Because `analytics.py` and `scoring.py` are pure functions over plain
 dicts, you can use them directly in a notebook:
 
 ```python
-from app.ingestion import load_records
+from app.ingestion import load_bulk_real_auction_data
 from app import analytics, scoring
 
-records, used_real = load_records()
-scores = scoring.score_all_pairs(records)
-top5 = scores[:5]
+records, source, warning = load_bulk_real_auction_data()
+top_pairs = analytics.discover_top_pairs(records, n=30)
+tracked_keys = {(p["source"], p["sink"]) for p in top_pairs}
+tracked_records = [r for r in records if (r["source"], r["sink"]) in tracked_keys]
+scores = scoring.score_all_pairs(tracked_records)
+top5 = sorted(scores, key=lambda s: s.score, reverse=True)[:5]
 ```
 
 ## Presentation
 
 `presentation/ERCOT_CRR_Capstone_Presentation.pptx` is a ready-to-edit
-60-minute deck outline covering ERCOT CRR fundamentals, the AI-assisted
-build workflow, a live-demo script (walks the same four tabs as the
-artifact), and lessons learned / future enhancements (also written out in
-full in `docs/lessons_learned_and_future_work.md`).
+60-minute deck covering ERCOT CRR fundamentals, the AI-assisted build
+workflow (including the real data-access course-correction and the
+FastAPI/Streamlit data-divergence bug described in the prompt journal), a
+live-demo script for the console's 5 pages, testing/validation proof, and
+lessons learned / future enhancements (also written out in full in
+`docs/lessons_learned_and_future_work.md`).
+
+It's generated from `presentation/build/build_deck.js` rather than edited
+directly, so its charts stay tied to the app's own real output
+(`data/snapshot.json`) instead of hand-typed numbers. To regenerate after
+any change:
+
+```bash
+cd presentation/build
+npm install pptxgenjs sharp react react-dom react-icons   # first time only
+node make_icons.js     # first time only, or if you change the icon set
+cd ../../backend && python scripts/export_snapshot.py     # refresh the real data behind the charts
+cd ../presentation/build && node build_deck.js
+```

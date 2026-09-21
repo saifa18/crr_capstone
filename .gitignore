@@ -1,6 +1,7 @@
 # Never commit real credentials
 backend/.env
 .env
+.env.local
 
 # Python
 __pycache__/
@@ -10,8 +11,11 @@ __pycache__/
 
 # Node (if the frontend is ever run as a standalone Vite/CRA app)
 node_modules/
-dist/
-build/
+frontend/dist/
+frontend/build/
 
 # OS
 .DS_Store
+
+# Local SDD scratch workspace (task briefs/reports) -- never a deliverable
+.superpowers/
