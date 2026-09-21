@@ -119,11 +119,58 @@ deck still not updated for this round.
 
 ---
 
+## v1.5 pass (2026-09) -- visual polish, Obligation/Option overlay, Binding Constraints
+
+Requested explicitly as a final-approval gate: Senior Software Engineer,
+Senior Power Trader, and Senior UX/UI Streamlit Designer, each reviewing
+the same diff (Plotly charts replacing Streamlit's built-ins, a shared
+color system, bordered card layout, an ERCOT corridor map, the
+Obligation/Option overlay chart, and the new live Binding Constraints
+tab) live against the real bundled dataset (1,120,889 records) and the
+real, authenticated ERCOT Public API.
+
+### Pass 1 -- Senior Software Engineer
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| No backend (`backend/app/*.py`) logic touched by this round | Yes | Entire round is scoped to `streamlit_app/`; all 136 backend tests pass unmodified throughout |
+| One color meaning, one source of truth | Yes | `theme.COLORS` (Obligation green, Option amber, High/Medium/Low tier colors) imported everywhere a chart or badge needs one of these, never a duplicated hex literal |
+| A real, reproducible crash was found and fixed before shipping, not papered over | Yes | `st.dataframe`/`st.plotly_chart`'s `width="stretch"` was found live (via a real Streamlit exception, not a code-review guess) to crash on the pinned Streamlit 1.38.0; fixed to `use_container_width=True` across every page and verified live afterward |
+| The new live-API tab degrades honestly | Yes | `get_binding_constraints` returns one of three explicit states (not configured / API error / real data), matching the existing weather panel's fail-open pattern; capped at 15 pages and a 30-day UI window so a wide date range degrades to fast-but-truncated rather than slow |
+| The Streamlit app loads its own credentials rather than depending on FastAPI having done so first | Yes (fixed this pass) | `streamlit_app/lib/data_loader.py` now calls `load_dotenv('backend/.env', override=False)` itself -- found missing during this pass's own review, confirmed live afterward that a completely standalone `streamlit run` correctly picks up real ERCOT API credentials with no other process involved |
+
+**Open items (not blocking):** no automated tests for the Streamlit page files themselves (matches this project's established pattern of live smoke-testing the UI layer rather than unit-testing it).
+
+### Pass 2 -- Senior Power Trader
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| Obligation and Option are genuinely comparable now, not toggled | Yes | Source/Sink Explorer plots both as separate colored lines on one chart with a shared legend and unified hover, replacing the old CRR-Type radio toggle |
+| The corridor map adds real information, not decoration | Yes | Points are the actual tracked hubs/load zones (real lat/lon borrowed from their weather zone), sized by how many of the top-30 corridors touch that point -- not a generic stock map |
+| Binding Constraints answers "why," not just "what" | Yes | Real, live ERCOT DAM shadow-price data: named constraint, contingency, shadow price, from/to station -- the physical grid element behind current congestion, verified live at 9,320 real constraints in a 7-day window |
+| The two data clocks (settled auction history vs. live constraints) are kept honestly separate | Yes | Binding Constraints page explicitly states both windows side by side ("Live ERCOT data: 2026-09-13 to 2026-09-20... auction data on the other tabs is separate and as of 2026-10") rather than implying one timeline |
+| Score/trend math itself is unchanged by this round | Yes (deliberate) | Live API data was explicitly kept out of the opportunity score and trend/consistency factors this round -- discussed and decided against, since splicing a multi-year price proxy across a changed grid topology into a score whose entire value proposition is "every number is auditable" would be an unvalidated bolt-on, the same category of decision this project already made once before for weather |
+
+**Open items (not blocking):** no next-auction calendar; no credit/collateral modeling; no saved watchlist -- all pre-existing gaps, unchanged by this round.
+
+### Pass 3 -- Senior UX/UI Streamlit Designer
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| Real charts, not placeholder built-ins | Yes | Every chart across all 5 pages is now Plotly (`st.plotly_chart`), with real legends, hover tooltips, and consistent theming -- no more bare `st.line_chart`/`st.bar_chart` |
+| Visual hierarchy, not one long scroll | Yes | Every logical section on every page is wrapped in `st.container(border=True)`, verified live as visually distinct cards, not just a code-level wrapper |
+| Color carries consistent meaning across pages | Yes | Obligation/Option and tier colors are pixel-identical wherever they appear (Overview's tier chart, Explorer's overlay, Opportunity Signals' tier dots) because all three pull from the same `theme.COLORS` dict |
+| Nothing looks like a bare prototype anymore | Yes | Corridor map, KPI deltas, and the fifth (Binding Constraints) tab all read as considered product surfaces, not a "we ran out of time" gap |
+
+**Open items (not blocking):** no mobile/responsive layout (reasonable for a desktop trading terminal, unchanged from prior rounds); no accessibility/keyboard-nav audit.
+
+---
+
 ## Deliverables checklist
 
 | Deliverable | Status | Where |
 |---|---|---|
-| AI prompt journal showing prompt evolution and validation | ✅ | `docs/prompt_journal.md`, 9 entries |
+| AI prompt journal showing prompt evolution and validation | ✅ | `docs/prompt_journal.md` |
 | Requirements document generated and refined with AI | ✅ | `docs/requirements.md`, v1.4, 22 FRs traced to tests |
-| Working prototype web application | ✅ | `backend/` (93 tests) + `frontend/` (connectable to it) + `streamlit_app/` |
-| 60-minute presentation | ✅ | `presentation/ERCOT_CRR_Capstone_Presentation.pptx` (not yet updated for v1.4 — see lessons-learned) |
+| Working prototype web application | ✅ | `streamlit_app/` (primary, shareable) backed by `backend/` (136 tests) |
+| 60-minute presentation | ⚠️ | `presentation/ERCOT_CRR_Capstone_Presentation.pptx` -- still reflects an earlier feature set, needs updating before delivery (see lessons-learned) |
