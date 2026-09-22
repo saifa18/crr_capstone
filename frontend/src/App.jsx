@@ -11,16 +11,23 @@ const NAV = [
   { to: "/", label: "Overview", end: true },
   { to: "/explorer", label: "Source / sink explorer" },
   { to: "/participants", label: "Participants" },
-  { to: "/signals", label: "Opportunity signals" },
+  { to: "/signals", label: "Path settlements" },
   { to: "/constraints", label: "Binding constraints" },
 ];
 
 export default function App() {
   const [meta, setMeta] = useState(null);
-  const [metaError, setMetaError] = useState(null);
+  // Connectivity (the sidebar dot) is driven by /health, not /api/meta --
+  // /health never touches the dataset or ERCOT, so it answers exactly one
+  // question ("is this FastAPI process alive") without an unrelated data-
+  // loading or upstream-ERCOT problem ever getting mislabeled as "backend
+  // unreachable." /api/meta is still fetched for the data-source label
+  // text, but a failure there no longer flips the dot to red on its own.
+  const [healthy, setHealthy] = useState(null); // null = checking, true/false once known
 
   useEffect(() => {
-    api.meta().then(setMeta).catch((e) => setMetaError(e.message));
+    api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
+    api.meta().then(setMeta).catch(() => {});
   }, []);
 
   return (
@@ -38,15 +45,20 @@ export default function App() {
           ))}
         </nav>
         <div className="rail-foot">
-          {metaError ? (
+          {healthy === false ? (
             <>
               <span className="dot red" />
               <span className="mono">backend unreachable</span>
             </>
-          ) : meta ? (
+          ) : healthy === true && meta ? (
             <>
               <span className="dot" />
               <span className="mono">{meta.data_source}</span>
+            </>
+          ) : healthy === true ? (
+            <>
+              <span className="dot" />
+              <span className="mono">backend reachable</span>
             </>
           ) : (
             <>

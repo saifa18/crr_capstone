@@ -144,12 +144,12 @@ export default function Explorer() {
         { key: "auction_month", label: "auction_month" },
         ...selectedPairs.map((p) => ({ key: pairKey(p), label: pairKey(p) })),
       ];
-      downloadCSV(chartData, columns, "corridor_comparison.csv");
+      downloadCSV(chartData, columns, "path_comparison.csv");
     }
   };
 
-  if (error) return <div className="state-msg error">Couldn't reach the backend — {error}</div>;
-  if (pairs.length === 0) return <div className="state-msg">Loading corridors…</div>;
+  if (error) return <div className="state-msg error">{error}</div>;
+  if (pairs.length === 0) return <div className="state-msg">Loading paths…</div>;
 
   return (
     <>
@@ -158,7 +158,7 @@ export default function Explorer() {
           <h1>Source / sink explorer</h1>
           <p className="subline">
             <span className="dot" />
-            Tracked corridor pricing history — compare up to {MAX_COMPARE} at once
+            Compare historical CRR auction prices for source → sink paths — track up to {MAX_COMPARE} at once
           </p>
         </div>
       </header>
@@ -166,7 +166,7 @@ export default function Explorer() {
       <div className="field-row">
         <select value="" onChange={(e) => addPair(e.target.value)} disabled={selectedKeys.length >= MAX_COMPARE}>
           <option value="">
-            {selectedKeys.length >= MAX_COMPARE ? `Max ${MAX_COMPARE} corridors` : "+ Add corridor…"}
+            {selectedKeys.length >= MAX_COMPARE ? `Max ${MAX_COMPARE} paths` : "+ Add path…"}
           </option>
           {pairs
             .filter((p) => !selectedKeys.includes(pairKey(p)))
@@ -217,7 +217,7 @@ export default function Explorer() {
       {selectedPairs.length > 0 && (
         <section className="panel">
           <div className="panel-head">
-            <h2>{compareMode ? "Corridor comparison" : pairLabel(selectedPairs[0])}</h2>
+            <h2>{compareMode ? "Path comparison" : pairLabel(selectedPairs[0])}</h2>
             <span className="legend-row">
               {!compareMode ? (
                 <>
@@ -225,7 +225,7 @@ export default function Explorer() {
                   <span><span className="legend-swatch" style={{ background: "var(--amber)" }} />Option</span>
                 </>
               ) : (
-                <span style={{ color: "var(--dim)" }}>{crrType === "OBLIGATION" ? "Obligation" : "Option"} price, per corridor</span>
+                <span style={{ color: "var(--dim)" }}>{crrType === "OBLIGATION" ? "Obligation" : "Option"} price, per path</span>
               )}
               <button
                 onClick={handleDownload}
@@ -281,7 +281,7 @@ export default function Explorer() {
       {!compareMode && participants && (
         <section className="panel">
           <div className="panel-head">
-            <h2>Participants active on this corridor</h2>
+            <h2>Participants active on this path</h2>
           </div>
           {participants.length === 0 ? (
             <div className="state-msg">No participants found for this pair.</div>

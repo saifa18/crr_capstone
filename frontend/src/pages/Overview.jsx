@@ -1,30 +1,26 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api.js";
-
-const TIER_COLOR = { High: "var(--green)", Medium: "var(--amber)", Low: "var(--dim-2)" };
+import { InfoTip } from "../InfoTip.jsx";
 
 export default function Overview() {
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState(null);
   const [hotPaths, setHotPaths] = useState(null);
-  const [weather, setWeather] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    Promise.all([api.dashboard(), api.hotPaths(5), api.weather()])
-      .then(([d, hp, w]) => {
+    Promise.all([api.dashboard(), api.hotPaths(5)])
+      .then(([d, hp]) => {
         setDashboard(d);
         setHotPaths(hp);
-        setWeather(w);
       })
       .catch((e) => setError(e.message));
   }, []);
 
-  if (error) return <div className="state-msg error">Couldn't reach the backend — {error}</div>;
+  if (error) return <div className="state-msg error">{error}</div>;
   if (!dashboard) return <div className="state-msg">Loading dashboard…</div>;
 
-  const tierTotal = Object.values(dashboard.tier_distribution).reduce((a, b) => a + b, 0) || 1;
   const latestMwPrior = dashboard.monthly_mw_trend.length >= 2
     ? dashboard.monthly_mw_trend[dashboard.monthly_mw_trend.length - 2].total_mw
     : null;
@@ -39,8 +35,9 @@ export default function Overview() {
           <h1>Overview</h1>
           <p className={`subline ${dashboard.data_source_warning ? "warn" : ""}`}>
             <span className="dot" />
+            Market-wide CRR auction activity, major paths, and active participants —{" "}
             {dashboard.data_source === "ercot_mis_real"
-              ? "Real ERCOT auction data"
+              ? "real ERCOT auction data"
               : dashboard.data_source}
             {dashboard.data_source_warning ? ` — ${dashboard.data_source_warning}` : ""}
           </p>
@@ -70,7 +67,7 @@ export default function Overview() {
         </div>
         <div className="kpi">
           <div className="kpi-value mono num">{dashboard.tracked_pair_count}</div>
-          <div className="kpi-label">tracked corridors</div>
+          <div className="kpi-label">tracked paths</div>
         </div>
         <div className="kpi">
           <div className="kpi-value mono">{dashboard.latest_auction_month}</div>
@@ -78,47 +75,26 @@ export default function Overview() {
         </div>
       </section>
 
-      <section className="grid-2">
-        <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-head">
-            <h2>Hot paths</h2>
-          </div>
-          <ul className="hotpaths">
-            {hotPaths.map((p) => (
-              <li key={`${p.source}-${p.sink}`}>
-                <div className="hp-main">
-                  <div className="hp-path">
-                    {p.source_name} → {p.sink_name}
-                  </div>
-                  <div className="hp-reason">{p.reason}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Hot paths</h2>
         </div>
-
-        <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-head">
-            <h2>Opportunity tiers</h2>
-          </div>
-          <div className="tier-bars">
-            {["High", "Medium", "Low"].map((tier) => (
-              <div className="tier-row" key={tier}>
-                <span className="tier-label">{tier}</span>
-                <div className="bar-track">
-                  <div
-                    className="bar-fill"
-                    style={{
-                      width: `${(100 * dashboard.tier_distribution[tier]) / tierTotal}%`,
-                      background: TIER_COLOR[tier],
-                    }}
-                  />
+        <p className="panel-note" style={{ marginBottom: 10 }}>
+          Ranked by total notional — gross MW-weighted auction activity across all tracked auction
+          months (not by participant count or congestion persistence, which are noted per path below).
+        </p>
+        <ul className="hotpaths">
+          {hotPaths.map((p) => (
+            <li key={`${p.source}-${p.sink}`}>
+              <div className="hp-main">
+                <div className="hp-path">
+                  {p.source_name} → {p.sink_name}
                 </div>
-                <span className="tier-count mono">{dashboard.tier_distribution[tier]}</span>
+                <div className="hp-reason">{p.reason}</div>
               </div>
-            ))}
-          </div>
-        </div>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="panel">
@@ -129,10 +105,30 @@ export default function Overview() {
           <thead>
             <tr>
               <th>Participant</th>
-              <th className="num-col">Net MW</th>
-              <th className="num-col">Notional ($)</th>
-              <th className="num-col">Distinct pairs</th>
-              <th className="num-col">Certificates</th>
+              <th className="num-col">
+                Net MW
+                <InfoTip>
+                  Sum of this participant's awarded MW across every tracked-history certificate — signed,
+                  so a BUY award adds and a SELL award subtracts. Net position across all tracked auction
+                  months, not just the latest one.
+                </InfoTip>
+              </th>
+              <th className="num-col">
+                Notional ($)
+                <InfoTip>
+                  Sum of (awarded MW × auction clearing price in $/MWh) across this participant's
+                  certificates — a signed sizing figure for comparing relative position size, not a
+                  fully time-scaled total settlement amount.
+                </InfoTip>
+              </th>
+              <th className="num-col">
+                Distinct paths
+                <InfoTip>Number of unique source → sink paths represented in this participant's certificates.</InfoTip>
+              </th>
+              <th className="num-col">
+                Certificates
+                <InfoTip>Count of CRR award records (certificates) this participant holds across the tracked auction months.</InfoTip>
+              </th>
             </tr>
           </thead>
           <tbody className="mono">
@@ -146,7 +142,7 @@ export default function Overview() {
                   {p.participant}
                 </td>
                 <td className="num-col num">{Math.round(p.total_awarded_mw).toLocaleString()}</td>
-                <td className="num-col num">{Math.round(p.total_notional).toLocaleString()}</td>
+                <td className="num-col num">${Math.round(p.total_notional).toLocaleString()}</td>
                 <td className="num-col num">{p.distinct_pairs}</td>
                 <td className="num-col num">{p.auction_count}</td>
               </tr>
@@ -154,32 +150,6 @@ export default function Overview() {
           </tbody>
         </table>
       </section>
-
-      {weather && (
-        <section className="panel" style={{ padding: "14px 20px 16px" }}>
-          <div className="panel-head" style={{ marginBottom: 11 }}>
-            <h2 style={{ fontSize: 13, color: "var(--dim)" }}>Weather context by ERCOT zone</h2>
-            <span className="panel-note">Context only — not a scoring input</span>
-          </div>
-          <div className="weather-row">
-            {weather.map((w) => (
-              <div className="weather-tile" key={w.zone}>
-                <div className="weather-zone">{w.zone}</div>
-                {w.error ? (
-                  <div className="weather-temp" style={{ color: "var(--red)", fontSize: 12 }}>
-                    unavailable
-                  </div>
-                ) : (
-                  <>
-                    <div className="weather-temp mono num">{Math.round(w.temperature_f)}°F</div>
-                    <div className="weather-wind mono">wind {Math.round(w.wind_mph)} mph</div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </>
   );
 }
