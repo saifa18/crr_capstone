@@ -101,7 +101,7 @@ function baseSlide() {
   const items = [
     ["01", "ERCOT power markets & CRRs", "LMP, congestion, Source/Sink, Option vs. Obligation", "10 min"],
     ["02", "AI-assisted workflow", "Requirements, prompt journal, and validation as we went", "12 min"],
-    ["03", "Live application demo", "Dashboard → Explorer → Participants → Opportunity Signals", "20 min"],
+    ["03", "Live application demo", "Overview → Explorer → Participants → Path Settlements → Binding Constraints", "20 min"],
     ["04", "Architecture & testing", "What's real, what's synthetic, and how it's proven correct", "10 min"],
     ["05", "Lessons learned & what's next", "What AI made easier, what still needed judgment", "8 min"],
   ];
@@ -249,7 +249,7 @@ function baseSlide() {
     ["search", "Verify before designing", "Confirmed what ERCOT actually publishes (and what's programmatically reachable) before writing any code"],
     ["brain", "Refine requirements with AI", "Turned the capstone brief into a full functional/non-functional requirements doc with traceable acceptance criteria"],
     ["code", "Build with tests alongside", "Every analytics/scoring function written as a pure, independently-testable unit from the start"],
-    ["checkcircle", "Validate before shipping", "136 backend tests, plus every UI change checked live in a real browser against the real backend before being called done"],
+    ["checkcircle", "Validate before shipping", "192 backend tests, plus every UI change checked live in a real browser against the real backend before being called done"],
   ];
   let x = 0.55;
   const cw = 2.95;
@@ -318,7 +318,7 @@ function baseSlide() {
   const boxes = [
     [0.55, "Data", "1.1M real ERCOT\nMIS auction records\n(bundled) or\nsynthetic fallback", "database"],
     [3.55, "Analytics core", "analytics.py\nscoring.py\n(pure functions,\nno I/O)", "layers"],
-    [6.55, "FastAPI", "/api/dashboard\n/api/pairs\n/api/participants\n/api/opportunity-scores", "code"],
+    [6.55, "FastAPI", "/api/dashboard\n/api/participants\n/api/live/binding-\nconstraints", "code"],
     [9.55, "React console", "Overview · Explorer\nParticipants · Signals\n· Binding constraints", "gitbranch"],
   ];
   boxes.forEach(([x, title, body, ic]) => {
@@ -333,7 +333,7 @@ function baseSlide() {
 
   s.addShape(pres.ShapeType.roundRect, { x: 0.55, y: 5.0, w: 11.7, h: 0.7, rectRadius: 0.08, fill: { color: "1A1E12" }, line: { color: "3A3D1F", width: 1 } });
   s.addText(
-    "136 pytest tests exercise the analytics core AND the API layer. The React console never computes " +
+    "192 pytest tests exercise the analytics core AND the API layer. The React console never computes " +
     "an average, a trend, or a score itself — it only renders what the tested core already produced.",
     { x: 0.9, y: 5.0, w: 11.0, h: 0.7, fontFace: FONT_BODY, fontSize: 13, color: AMBER, valign: "middle", isTextBox: true, margin: 0 }
   );
@@ -351,11 +351,11 @@ function baseSlide() {
     x: 0.55, y: 0.95, w: 10, h: 0.7, fontFace: FONT, fontSize: 30, bold: true, color: TEXT, isTextBox: true, margin: 0,
   });
   const demoSteps = [
-    ["Overview", "Latest real auction month, MW awarded, top opportunity corridors, top participants by notional"],
-    ["Source/Sink Explorer", "Pick any of the 30 tracked corridors (or compare up to 3 at once); Obligation vs. Option price history"],
-    ["Participants", "Search 377 real CRR Account Holders; drill into any participant's recent certificate-level activity"],
-    ["Opportunity Signals", "Every corridor's Low/Medium/High score with its four factor sub-scores and plain-language explanation"],
-    ["Binding Constraints", "Live ERCOT transmission constraints right now — a separate, real-time clock from the settled auction data"],
+    ["Overview", "Latest real auction month, MW awarded, hot paths by notional, top participants"],
+    ["Source/Sink Explorer", "Pick any of the 30 tracked corridors (or compare up to 3 at once); Obligation vs. Option auction price history"],
+    ["Participants", "Search 377 real CRR Account Holders; certificates, strict CRR-type filtering, and real settlement value by participant/path"],
+    ["Path Settlements", "How each path actually settled — real ERCOT Day-Ahead SPPs (Sink minus Source), not the auction price; the legacy Low/Medium/High auction-based score is kept as one demoted line, not deleted"],
+    ["Binding Constraints", "Live ERCOT transmission constraints right now — a separate, real-time clock from the settled auction data, real shadow prices with no invented severity label"],
   ];
   let y = 1.75;
   demoSteps.forEach(([title, body], i) => {
@@ -376,9 +376,12 @@ function baseSlide() {
 // ---------------------------------------------------------------
 {
   const s = baseSlide();
-  eyebrow(s, "Demo fallback · opportunity signals", 0.55);
+  eyebrow(s, "Demo fallback · legacy auction-based signal", 0.55);
   s.addText("Top-scoring Source/Sink corridors", {
     x: 0.55, y: 0.95, w: 11, h: 0.7, fontFace: FONT, fontSize: 28, bold: true, color: TEXT, isTextBox: true, margin: 0,
+  });
+  s.addText("Demoted to a secondary signal on the Path Settlements page — real ERCOT settlement value is the primary one now.", {
+    x: 0.55, y: 1.5, w: 12, h: 0.3, fontFace: FONT_BODY, fontSize: 11.5, italic: true, color: TEXT_DIM, isTextBox: true, margin: 0,
   });
 
   const chartData = [{
@@ -387,7 +390,7 @@ function baseSlide() {
     values: topScores.map((r) => r.score),
   }];
   s.addChart(pres.ChartType.bar, chartData, {
-    x: 0.55, y: 1.75, w: 12.2, h: 4.3, barDir: "bar",
+    x: 0.55, y: 2.05, w: 12.2, h: 4.0, barDir: "bar",
     showTitle: false, showLegend: false, showValue: true,
     dataLabelColor: TEXT, dataLabelFontSize: 10, dataLabelPosition: "outEnd",
     chartColors: [GREEN],
@@ -453,7 +456,7 @@ function baseSlide() {
   });
 
   const proofs = [
-    ["flask", "136/136 backend tests pass", "Analytics, scoring, ingestion (including real ERCOT column parsing), live-API client, and every FastAPI endpoint — re-run after every change, not just once"],
+    ["flask", "192/192 backend tests pass", "Analytics, scoring, ingestion (including real ERCOT column parsing), live-API client, and every FastAPI endpoint — re-run after every change, not just once"],
     ["target", "Scoring engine is behavior-tested, not just shape-tested", "A synthetic strong pair (high/rising/consistent/liquid) is asserted to outrank a synthetic weak pair — the score reacts to what it claims to"],
     ["search", "A real bug the tests alone wouldn't have caught", "The backend was quietly serving synthetic data through one code path while Streamlit showed real data through another — found by comparing the two live, not by re-reading either one"],
     ["checkcircle", "Every UI change verified in a real running browser", "Live backend + live frontend, clicked/hovered/typed through with real data on screen, not just component tests against mocks"],
@@ -552,7 +555,7 @@ function baseSlide() {
     x: 0.55, y: 3.3, w: 10, h: 1.0, fontFace: FONT, fontSize: 40, bold: true, color: GREEN, isTextBox: true, margin: 0,
   });
   s.addShape(pres.ShapeType.line, { x: 0.6, y: 4.5, w: 3.2, h: 0, line: { color: BORDER, width: 1 } });
-  s.addText("Repository: ercot-crr-analytics/  ·  136/136 tests passing  ·  README.md has full setup instructions", {
+  s.addText("Repository: ercot-crr-analytics/  ·  192/192 tests passing  ·  README.md has full setup instructions", {
     x: 0.6, y: 4.7, w: 11, h: 0.4, fontFace: FONT_MONO, fontSize: 12.5, color: TEXT_DIM, isTextBox: true, margin: 0,
   });
   pageNum(s, 15);

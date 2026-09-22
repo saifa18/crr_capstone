@@ -507,7 +507,157 @@ to cut it is as much a part of this workflow as building it.
 
 ---
 
-## Entry 12 (template for your own use)
+## Entry 12 — Root-causing a broken "Previous" button instead of patching it
+
+**Prompt (paraphrased):**
+> The Certificates table's Previous button is broken — advancing pages then
+> going back either does nothing or shows stale data. Also, selecting a CRR
+> type still shows the other type's rows. Find and fix the root cause; do
+> not patch this cosmetically. Inspect pagination state, API params, and
+> useEffect dependencies before changing anything.
+
+**What Claude did:** Reproduced both bugs before touching code, per the
+explicit "do not guess" instruction. Root cause #1: the certificate-fetch
+effect special-cased `if (certPage === 1) return;`, on the assumption that
+page 1 was always already loaded by a separate "full reload" effect — true
+right after a filter change, false after paginating away and pressing
+Previous back to page 1, so the table silently kept showing whichever later
+page had last been fetched. Root cause #2: the CRR-type toggle only fed the
+participant-search combobox, and was never passed to the certificates
+endpoint at all — `/api/participants/{name}` didn't even accept a
+`crr_type` parameter. Fixed by merging the reload/page-turn effects into
+one, computing the effective page synchronously within a single fetch
+rather than relying on a second effect's next-render timing (which would
+reintroduce the exact same class of stale-page race), and adding real
+`crr_type` filtering to the backend, applied before pagination.
+
+**Validation:** New backend tests (`test_participant_detail_crr_type_
+filters_strictly`, case-insensitivity, invalid-value 422) plus live browser
+verification: Page 1 → Next → Next → Previous → Previous confirmed to
+return the exact original page's rows at each step; switching CRR type
+while sitting on page 2 confirmed to reset to page 1 with only the selected
+type's rows. Caught and fixed a second real bug this same session, found
+only through that live verification: the fix's `setDetail(body)` call was
+still conditionally gated on "is this the run that detected the filter
+change," which left `detail` stuck at `null` forever whenever two effect
+runs fired for one logical change (the second one — the one that actually
+survives the request-supersession guard — didn't believe itself to be the
+"real" filter-change run). Un-gating it fixed a second live repro (switching
+CRR type while on page 2 got stuck on "Loading activity…" until this was
+found in the browser, not just reasoned about).
+
+**Result:** Kept the unified-effect pattern and reused it for every
+subsequent paginated section this session (Path settlement value,
+Binding Constraints) specifically because it was independently verified
+live, not just because it looked correct on paper.
+
+---
+
+## Entry 13 — Finding a real ERCOT data-quality bug while building pagination
+
+**Prompt (paraphrased):**
+> Paginate the Binding Constraints table server-side (it's loading 9,000+
+> rows at once) and audit why the constraint search dropdown doesn't
+> include every real constraint. Also clean up the column language — explain
+> Hour, Constraint, Contingency, Element endpoints, and Shadow price from
+> the actual backend/ERCOT fields, don't invent definitions. Fix the info
+> tooltips, which don't display. Audit whether the High/Medium/Low labels
+> are arbitrary before deciding to keep or remove them.
+
+**What Claude did:** Before touching the UI, called the real live-
+credentialed ERCOT endpoint directly to see the raw row shape rather than
+guessing. Found the actual root cause behind the confusing "24:006437__F"
+value the user had seen: `hourEnding` comes back from ERCOT as a zero-
+padded `"24:00"` string — the exact same shape already discovered and
+fixed once for the settlement-price endpoint, just never applied to this
+one — and every string field (`constraintName`, `contingencyName`,
+`fromStation`, `toStation`) carries leading whitespace baked in by ERCOT's
+own fixed-width text formatting. Both normalized at the source. Separately
+found and fixed why the tooltips didn't render: the table's
+`overflow-x: auto` wrapper (needed for horizontal scroll) forces
+`overflow-y: auto` too per the CSS spec, silently clipping every upward-
+opening tooltip bubble that popped up near the top of that wrapper —
+confirmed by measuring the bubble's rect landing entirely above its
+scrolling ancestor's own top edge, not assumed from the symptom alone.
+Rewrote the tooltip as a React portal to `document.body` so no ancestor's
+overflow can ever clip it again. For the severity audit: traced the
+High/Medium/Low logic to an even tertile split of the currently-loaded
+window's own shadow prices — real, transparent, already-disclosed via its
+own tooltip, but not an ERCOT-defined threshold.
+
+**Validation:** New pagination/filter/sort backend tests plus a live
+browser check that page 3 → Previous → Previous returns the exact original
+page 1 rows; the constraint dropdown confirmed to carry all 402 distinct
+real constraint names in the window (not just the 25 on the loaded page)
+via a direct API check; the tooltip fix confirmed by measuring the portal-
+rendered bubble's rect against the viewport for both an edge-clipped
+(leftmost) and previously-invisible (rightmost) column.
+
+**Result:** Kept the severity classification (with its methodology
+disclosed) in this round, since it was defensible; a later, explicit
+follow-up request removed it entirely in favor of the raw shadow price —
+see Entry 14.
+
+---
+
+## Entry 14 — Final demo pass: a deliberate reversal, an honest cleanup audit, and knowing what not to delete
+
+**Prompt (paraphrased):**
+> Prepare this app for a live demo to power traders: improve page copy so
+> the app's story is self-explanatory, remove the High/Medium/Low
+> constraint labels entirely (the real shadow price is enough), but this
+> time keep Hour and Constraint combined in one field/column instead of
+> split — reverse that earlier decision. Then, only after the app is
+> correct, audit the repo for dead code and stale docs and clean it up,
+> but do not delete anything without checking references, tests, and
+> runtime use first.
+
+**What Claude did:** Reversed the Entry 13 column split on explicit
+instruction — recombined Hour and Constraint into one "HourEnding :
+Constraint" column, but rendered it as `24 : 6437__F` (a readable
+separator) rather than literally reproducing the original unseparated
+"24:006437__F" string the request's own example quoted, since every other
+instruction in the same request explicitly asked for "clean," "professional,"
+"demo-ready" copy — flagged this specific interpretation call back to the
+user rather than silently picking one reading. Removed the severity tiers
+end to end (backend thresholds/filter/response field, frontend badges/
+filter/tooltip, the now-dead `.tier-chip` CSS) with no replacement score
+invented. For the cleanup audit: checked every backend module's real
+import graph (all genuinely referenced, nothing orphaned), grepped the
+frontend for any `synthetic`/`demo`/`fake` language reaching the UI (found
+none — the one match was an honest, intentional disclosure message, not a
+leak), and specifically verified live that the running app's actual active
+data source was real ERCOT data (`data_source: "ercot_mis_real"`, zero
+warning) before writing that into the audit report as a confirmed fact
+rather than an assumption. Found one genuinely dead field
+(`/api/dashboard`'s `tier_distribution`/`top_opportunity_pairs`, a
+Streamlit-era chart the React rebuild never rendered) and removed it —
+but explicitly did NOT remove `weather_zones.py`/`/api/corridor-map`/
+`/api/weather`, which have no current frontend consumer either, because
+`weather_zones.py` is a shared module (corridor-map's zone data) and
+deleting a whole working, tested feature under uncertainty is a much
+bigger and more permanent call than trimming two confirmed-dead response
+fields — flagged for a deliberate future decision instead of acted on
+unilaterally.
+
+**Validation:** 192 backend tests passing (down from 194: one dedicated
+severity test removed, two dashboard tests merged to reflect the removed
+fields, net new pagination/normalization tests added), `vite build` clean,
+and a full live walkthrough of all 5 pages after a stale long-running dev
+server session briefly appeared to hang on Overview — traced to the dev
+server itself (a fresh restart fixed it immediately, and the underlying
+production `vite build` had been clean the entire time), not a code
+regression, before reporting it as such.
+
+**Result:** Kept the reversal, the removed severity tiers, and the one
+confirmed-dead-field cleanup; explicitly left the weather/corridor-map
+question open rather than guessing at the "right" answer under time
+pressure — itself a data point for the lessons-learned doc: knowing when
+*not* to delete something is as much a judgment call as knowing when to.
+
+---
+
+## Entry 15 (template for your own use)
 
 **Prompt:** *(fill in what you asked Claude for)*
 
